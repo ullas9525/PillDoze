@@ -3,18 +3,22 @@
 
 RTC_DS3231 rtc;
 
-const int irPins[6] = {2, 3, 4, 5, 6, 7};    // IR sensor pins
-const int ledPins[6] = {8, 9, 10, 11, 12, 13}; // LED pins
+const int irPins[6] = {2, 3, 4, 5, 6, 7};       // IR sensor pins
+const int ledPins[6] = {8, 9, 10, 11, 12, 13};  // LED pins
+const int buzzerPin = A0;                      // Buzzer pin
 
 // Set schedule time for each compartment (HH, MM)
-int scheduleHour[6] = {14, 14, 14, 14, 14, 15};  // 6 time slots
-int scheduleMinute[6] = {51, 54, 56, 57, 58, 0};
+int scheduleHour[6] = {16, 16, 16, 16, 16, 16};  
+int scheduleMinute[6] = {6, 6, 6, 6, 6, 6};
 
 bool triggered[6] = {false, false, false, false, false, false};
 
 void setup() {
   Serial.begin(9600);
   rtc.begin();
+
+  pinMode(buzzerPin, OUTPUT);
+  digitalWrite(buzzerPin, LOW);
 
   for (int i = 0; i < 6; i++) {
     pinMode(irPins[i], INPUT);
@@ -23,7 +27,7 @@ void setup() {
   }
 
   if (rtc.lostPower()) {
-    rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // Set time from PC compile time
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__))); // Set RTC time from compile time
   }
 }
 
@@ -37,7 +41,7 @@ void loop() {
         triggered[i] = true;
       }
     } else {
-      triggered[i] = false; // Reset once time has passed
+      triggered[i] = false; // Reset trigger after the time passes
     }
   }
 
@@ -53,6 +57,10 @@ void handleCompartment(int activeIndex) {
     digitalWrite(ledPins[i], i == activeIndex ? HIGH : LOW);
   }
 
+  // Buzz alert
+  digitalWrite(buzzerPin, HIGH);
+
+
   bool detected = false;
 
   while (!detected) {
@@ -61,13 +69,14 @@ void handleCompartment(int activeIndex) {
 
       if (i == activeIndex && irValue == LOW) {
         Serial.println("Pill taken ✅");
+        digitalWrite(buzzerPin, LOW);
         digitalWrite(ledPins[i], LOW); // Turn off LED
         detected = true;
         break;
       } else if (i != activeIndex && irValue == LOW) {
         Serial.print("Error ❌ - Wrong compartment accessed: ");
         Serial.println(i + 1);
-        // Optional: add buzzer or alert here
+        // Optional: add error buzzer sound
         delay(1000);
       }
     }
