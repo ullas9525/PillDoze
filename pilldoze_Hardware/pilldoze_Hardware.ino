@@ -7,8 +7,8 @@ const int irPins[6] = {2, 3, 4, 5, 6, 7};
 const int ledPins[6] = {8, 9, 10, 11, 12, 13};
 const int buzzerPin = A0;
 
-int scheduleHour[6] = {16, 16, 16, 16, 16, 16};
-int scheduleMinute[6] = {6, 6, 6, 6, 6, 6};
+int scheduleHour[6] = {-1, -1, -1, -1, -1, -1};
+int scheduleMinute[6] = {-1, -1, -1, -1, -1, -1};
 
 bool triggered[6] = {false, false, false, false, false, false};
 String compartmentNames[6] = {"C1", "C2", "C3", "C4", "C5", "C6"};
