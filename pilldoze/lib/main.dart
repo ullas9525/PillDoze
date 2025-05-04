@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:intl/intl.dart'; // Required for date/time formatting
 import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 import 'dart:convert'; // Import dart:convert for JSON encoding/decoding
+import 'dart:async'; // Import async for StreamController
 
 void main() {
   runApp(MyApp());
@@ -16,10 +17,11 @@ class MyApp extends StatelessWidget {
       home: BluetoothConnectScreen(),
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        primarySwatch: Colors.blue,
+        // Changed the primary swatch color to light blue
+        primarySwatch: Colors.lightBlue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
-        // Define error color for consistency
-        colorScheme: ColorScheme.fromSwatch(primarySwatch: Colors.blue).copyWith(error: Colors.redAccent),
+        // Define error color for consistency using the new primary swatch
+        colorScheme: ColorScheme.fromSwatch(primarySwatch: Colors.lightBlue).copyWith(error: Colors.redAccent),
       ),
     );
   }
@@ -38,6 +40,16 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
   bool isConnecting = false;
   bool isConnected = false;
   String connectionStatus = '';
+
+  // Buffer for incoming data
+  String _incomingDataBuffer = "";
+
+  // StreamController to send messages to other screens
+  final StreamController<String> _messageController = StreamController<String>.broadcast();
+
+  // Stream getter for other screens to listen to
+  Stream<String> get messageStream => _messageController.stream;
+
 
   @override
   void initState() {
@@ -60,6 +72,8 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
             devicesList = []; // Clear device list
             selectedDevice = null; // Clear selected device
           });
+          // Also notify listeners that connection is lost
+          _messageController.add('Bluetooth Disconnected.');
         }
       }
     });
@@ -99,6 +113,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
       connection?.dispose();
     }
     connection = null;
+    _messageController.close(); // Close the stream controller
     super.dispose();
   }
 
@@ -187,11 +202,22 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
       });
       print("Successfully connected to ${selectedDevice!.address}");
 
-      // Listen for disconnection AFTER connection is established and state is set
+      // --- START: Listening for incoming data from Arduino ---
+      // This is the *only* listener for the Bluetooth input stream
       connection?.input?.listen(
         (Uint8List data) {
-          // Handle data received from Arduino if needed on this screen
-          // print('Data received on ConnectScreen: ${String.fromCharCodes(data)}');
+          // Convert incoming data to a string and add to buffer
+          String incomingString = String.fromCharCodes(data);
+          _incomingDataBuffer += incomingString;
+
+          // Process complete messages (ending with newline)
+          int newlineIndex;
+          while ((newlineIndex = _incomingDataBuffer.indexOf('\n')) != -1) {
+            String message = _incomingDataBuffer.substring(0, newlineIndex).trim();
+            _incomingDataBuffer = _incomingDataBuffer.substring(newlineIndex + 1);
+
+            _handleIncomingMessage(message); // Call method to handle the message
+          }
         },
         onDone: () {
           // Connection closed
@@ -203,6 +229,8 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
               connectionStatus = 'Device disconnected.';
               connection = null; // Clear the connection object
             });
+            // Also notify listeners that connection is lost
+            _messageController.add('Device disconnected.');
           }
         },
         onError: (error) {
@@ -215,10 +243,13 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                 connectionStatus = 'Connection Error: $error';
                 connection = null; // Clear the connection object
               });
+              // Also notify listeners about the error
+              _messageController.add('Connection Error: $error');
             }
         },
         cancelOnError: true // Cancel subscription on error
       );
+      // --- END: Listening for incoming data from Arduino ---
 
     } catch (e) {
         // Error during the connection attempt itself
@@ -230,12 +261,32 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
            connectionStatus = "Connection Failed: ${e.toString()}"; // Show specific error
            connection = null; // Clear the connection object
          });
+         // Notify listeners about the connection failure
+         _messageController.add("Connection Failed: ${e.toString()}");
         }
     }
   }
 
+   // Handle incoming messages from Arduino and add to the stream
+  void _handleIncomingMessage(String message) {
+    print("Received message from Arduino: '$message'"); // Print the exact received message
+
+    // Add the message to the stream controller
+    _messageController.add(message);
+
+    // You can still add logging to confirm message content if needed
+    if (message.contains("Pill taken ✅")) {
+      print("Message contains 'Pill taken ✅'.");
+    } else if (message.contains("Error ❌ - Wrong compartment accessed:")) {
+      print("Message contains 'Error ❌ - Wrong compartment accessed:'.");
+    } else {
+      print("Received message does not match known patterns. Message: '$message'");
+    }
+  }
+
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(context) { // Added context parameter
     return Scaffold(
       appBar: AppBar(
         title: Text('Connect Pill Dispenser'),
@@ -306,17 +357,22 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
+                // Background color is the primary color (light blue)
                 backgroundColor: isConnected ? Colors.grey : Theme.of(context).primaryColor,
                 disabledBackgroundColor: Colors.grey[400], // Style for disabled state
+                // Set text color to black for visibility
+                foregroundColor: Colors.black,
               ),
               child: isConnecting
                   ? SizedBox(
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Text(isConnected ? 'Connected' : 'Connect', style: TextStyle(fontSize: 16)),
+                  : Text(isConnected ? 'Connected' : 'Connect', style: TextStyle(fontSize: 16)), // Text color is set by foregroundColor
             ),
             SizedBox(height: 15),
+
+            // Removed the latest Arduino message display from here
 
             // --- Continue Button (only shown if connected) ---
             if (isConnected && connection != null) // Also check if connection object is not null
@@ -337,7 +393,11 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (_) => CompartmentScreen(connection: connection!),
+                      // Pass the connection AND the message stream
+                      builder: (_) => CompartmentScreen(
+                        connection: connection!,
+                        messageStream: messageStream,
+                      ),
                     ),
                   ).then((_) {
                     // When returning from CompartmentScreen, check connection status again
@@ -357,13 +417,16 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                   });
                 },
                   style: ElevatedButton.styleFrom(
+                    // Keep background color green
                     backgroundColor: Colors.green,
+                    // Set text color to black
+                    foregroundColor: Colors.black,
                     padding: EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: Text('Set Up Compartments', style: TextStyle(fontSize: 16)),
+                  child: Text('Set Up Compartments', style: TextStyle(fontSize: 16)), // Text color is set by foregroundColor
               ),
           ],
         ),
@@ -376,8 +439,9 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
 // --- Compartment Setup Screen (With Persistence) ---
 class CompartmentScreen extends StatefulWidget {
   final BluetoothConnection connection;
+  final Stream<String> messageStream; // Receive the message stream
 
-  CompartmentScreen({required this.connection});
+  CompartmentScreen({required this.connection, required this.messageStream});
 
   @override
   _CompartmentScreenState createState() => _CompartmentScreenState();
@@ -395,6 +459,13 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
   // Track connection state locally, initialized from the passed connection
   bool _isBluetoothConnected = false;
 
+  // State variable to hold the latest message received on this screen
+  String latestArduinoMessage = 'No messages yet.';
+
+  // Subscription to the message stream
+  StreamSubscription<String>? _messageSubscription;
+
+
   @override
   void initState() {
     super.initState();
@@ -403,16 +474,65 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     print("CompartmentScreen initState. Initial connection state: $_isBluetoothConnected");
     _loadCompartmentData(); // Load saved data
 
-    // Removed the duplicate listener on widget.connection.input
-    // The BluetoothConnectScreen is responsible for managing the primary listener.
-
-    // If you need to react to incoming data on this screen, you would need
-    // a different mechanism, perhaps a shared state management solution
-    // or callbacks passed from the BluetoothConnectScreen.
+    // --- START: Listening to the message stream from BluetoothConnectScreen ---
+    _messageSubscription = widget.messageStream.listen((message) {
+      _handleIncomingMessage(message); // Handle the message received from the stream
+    },
+    onError: (error) {
+      print("CompartmentScreen: Error on message stream: $error");
+      // Handle errors from the stream if necessary
+    },
+    onDone: () {
+      print("CompartmentScreen: Message stream closed.");
+      // Handle stream closure if necessary
+    });
+    // --- END: Listening to the message stream from BluetoothConnectScreen ---
   }
 
+  @override
+  void dispose() {
+    // Cancel the message stream subscription
+    _messageSubscription?.cancel();
+    super.dispose();
+  }
+
+
+  // --- START: Handle incoming messages from Arduino and update the message display on THIS screen ---
+  void _handleIncomingMessage(String message) {
+    print("CompartmentScreen received message from stream: '$message'"); // Print the exact received message
+
+    if (!mounted) {
+      print("CompartmentScreen: Handle incoming message called, but widget is not mounted.");
+      return;
+    }
+
+    // Update the state variable with the latest message
+    setState(() {
+      latestArduinoMessage = message;
+    });
+
+    // You can still add logging to confirm message content if needed
+    if (message.contains("Pill taken ✅")) {
+      print("CompartmentScreen: Message contains 'Pill taken ✅'.");
+    } else if (message.contains("Error ❌ - Wrong compartment accessed:")) {
+      print("CompartmentScreen: Message contains 'Error ❌ - Wrong compartment accessed:'.");
+    } else if (message.contains("Disconnected")) {
+      print("CompartmentScreen: Message indicates disconnection.");
+      setState(() {
+        _isBluetoothConnected = false;
+      });
+    } else if (message.contains("Connection Error")) {
+       print("CompartmentScreen: Message indicates connection error.");
+       setState(() {
+         _isBluetoothConnected = false;
+       });
+    }
+  }
+  // --- END: Handle incoming messages from Arduino and update the message display on THIS screen ---
+
+
   Future<void> _loadCompartmentData() async {
-    print("Attempting to load compartment data...");
+    print("CompartmentScreen: Attempting to load compartment data...");
     // Ensure mounted check if called late
     if (!mounted) return;
     setState(() { _isLoading = true; }); // Show loading indicator
@@ -436,19 +556,19 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
              setState(() {
                compartmentData = loadedData;
              });
-             print("Successfully loaded compartment data.");
+             print("CompartmentScreen: Successfully loaded compartment data.");
            }
         } else {
-           print("Warning: Loaded data length mismatch (${loadedData.length}). Using defaults.");
+           print("CompartmentScreen: Warning: Loaded data length mismatch (${loadedData.length}). Using defaults.");
            // Optionally clear saved data if structure changed: prefs.remove(_compartmentDataKey);
         }
 
       } catch (e) {
-         print("Error loading compartment data: $e. Using defaults.");
+         print("CompartmentScreen: Error loading compartment data: $e. Using defaults.");
          // prefs.remove(_compartmentDataKey); // Consider clearing corrupted data
       }
     } else {
-      print("No saved compartment data found. Using defaults.");
+      print("CompartmentScreen: No saved compartment data found. Using defaults.");
     }
      // Ensure mounted before final setState
      if (mounted) {
@@ -459,11 +579,11 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
   }
 
   Future<void> _saveCompartmentData() async {
-    print("Attempting to save compartment data...");
+    print("CompartmentScreen: Attempting to save compartment data...");
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String saveDataJson = jsonEncode(compartmentData);
     await prefs.setString(_compartmentDataKey, saveDataJson);
-    print("Compartment data saved.");
+    print("CompartmentScreen: Compartment data saved.");
   }
 
 
@@ -587,7 +707,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
       final dt = format.parse(timeString);
       return TimeOfDay.fromDateTime(dt);
     } catch (e) {
-      print("Error parsing time '$timeString': $e");
+      print("CompartmentScreen: Error parsing time '$timeString': $e");
       return null;
     }
   }
@@ -602,24 +722,20 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
            SnackBar(content: Text('Bluetooth disconnected! Cannot send data.'), backgroundColor: Colors.red),
          );
        }
-       print("Attempted to send data but Bluetooth is disconnected.");
+       print("CompartmentScreen: Attempted to send data but Bluetooth is disconnected.");
        return;
     }
 
     String compartmentCode = 'C${index + 1}';
     String message = '$compartmentCode|$name|$time\n';
-    print("Attempting to send message: $message");
+    print("CompartmentScreen: Attempting to send message: $message");
     try {
       widget.connection.output.add(Uint8List.fromList(message.codeUnits));
       widget.connection.output.allSent.then((_) {
-         print('Successfully sent to Arduino: $message');
-         if (mounted) {
-           ScaffoldMessenger.of(context).showSnackBar(
-             SnackBar(content: Text('Compartment ${index + 1} data sent to dispenser.'), duration: Duration(seconds: 2)),
-           );
-         }
+         print('CompartmentScreen: Successfully sent to Arduino: $message');
+         // Removed SnackBar here
       }).catchError((error) {
-         print("Error confirming data send: $error");
+         print("CompartmentScreen: Error confirming data send: $error");
          if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
              SnackBar(content: Text('Error confirming send: $error'), backgroundColor: Colors.red),
@@ -629,7 +745,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
          }
       });
     } catch (e) {
-       print("Error sending data: $e");
+       print("CompartmentScreen: Error sending data: $e");
        if (mounted) {
          ScaffoldMessenger.of(context).showSnackBar(
            SnackBar(content: Text('Error sending data: $e'), backgroundColor: Colors.red),
@@ -653,7 +769,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
       ),
       body: _isLoading
             ? Center(child: CircularProgressIndicator())
-            : Column( // Add column to show connection status message
+            : Column( // Add column to show connection status message and message display
               children: [
                 // Show connection status banner if not connected
                 if (!_isBluetoothConnected)
@@ -667,7 +783,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                        textAlign: TextAlign.center,
                      ),
                    ),
-                // List view takes remaining space
+                // List view takes remaining space (Kept above the message card)
                 Expanded(
                   child: ListView.builder(
                     padding: EdgeInsets.all(10),
@@ -695,6 +811,29 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                         ),
                       );
                     },
+                  ),
+                ),
+                // Display Latest Arduino Message (Moved below the list)
+                Card(
+                  elevation: 2,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  margin: EdgeInsets.symmetric(horizontal: 10, vertical: 5), // Add some margin
+                  child: Padding(
+                    padding: const EdgeInsets.all(15.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Latest Dispenser Message:',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          latestArduinoMessage,
+                          style: TextStyle(fontSize: 14),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
