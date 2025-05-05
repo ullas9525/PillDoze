@@ -13,17 +13,96 @@ dependencies:
   flutter_bluetooth_serial: ^0.4.0
   intl: ^0.18.1
   shared_preferences: ^2.0.15
+  permission_handler: ^11.3.1 # Added permission_handler package
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_launcher_icons: "^0.14.3"
+  flutter_lints: ^3.0.1
+  flutter_native_splash: ^2.3.10
 
+# Configuration for the flutter_launcher_icons package (for your app icon)
 flutter_launcher_icons:
   android: "launcher_icon"
   ios: true
-  image_path: "assets/images/icon.png"
-  flutter_lints: ^3.0.1
+  image_path: "assets/images/icons.png" # Path to your app launcher icon
+
+# Configuration for the flutter_native_splash package (for the splash screen)
+flutter_native_splash:
+  # Added the color property back, set to black to satisfy package requirement.
+  # This might result in a black background behind your image.
+  color: "#000000"
+
+  # Set the image to be displayed on the splash screen.
+  # IMPORTANT: Ensure this image file exists and has a transparent background
+  # if you want only the icon to show without an image background.
+  image: "assets/images/splash_logo.png" # Path to your splash screen image
+
+  # Optional: specify the image size for the splash screen (adjust as needed)
+  # image_size: 150
+
+  # Optional: fullscreen splash screen
+  # fullscreen: true
+
+  # Configure for specific platforms (ensure Android and iOS are true)
+  android: true
+  ios: true
+  web: false # Set to true if you are targeting web
+
+
+  # Optional: specific color/image for dark mode (requires Flutter 2.5 or later)
+  # color_dark: "#042a49"
+  # image_dark: "assets/images/splash_logo_dark.png"
+
+  # Optional: branding image at the bottom (requires Flutter 3.0 or later)
+  # branding: "assets/images/branding.png"
+  # branding_dark: "assets/images/branding_dark.png"
+
+  # Optional: android 12 and greater splash screen configuration
+  # android_12:
+  #   image: "assets/images/android12_splash.png"
+  #   icon_background_color: "#111111"
+  #   icon_background_color_dark: "#eeeeee"
+  #   theming_mode: "light" # or "dark" or "system"
+
+  # Optional: iOS 13 and greater splash screen configuration
+  # ios_content_mode: "scaleAspectFit" # or "scaleAspectFill" or "center"
+
+  # Optional: custom splash screen duration (Android only)
+  # android_splash_duration: 5
+
 
 flutter:
   uses-material-design: true
+
+  # To add assets to your application, add an assets section, like this:
+  assets:
+    - assets/images/icons.png # Make sure your app icon is listed here
+    - assets/images/splash_logo.png # Make sure your splash image is listed here
+
+  # An image asset can refer to one or more resolution-specific "variants", see
+  # https://flutter.dev/assets-and-images/#resolution-aware.
+
+  # For details regarding adding assets from package dependencies, see
+  # https://flutter.dev/assets-and-images/#from-packages
+
+  # To add custom fonts to your application, add a fonts section here,
+  # in this "flutter" section. Each entry in this list should have a
+  # "family" key with the font family name, and a "fonts" key with a
+  # list giving the asset and other descriptors for the font. For
+  # example:
+  # fonts:
+  #   - family: Schyler
+  #     fonts:
+  #       - asset: fonts/Schyler-Regular.ttf
+  #       - asset: fonts/Schyler-Italic.ttf
+  #         style: italic
+  #   - family: Trajan Pro
+  #     fonts:
+  #       - asset: fonts/TrajanPro.ttf
+  #       - asset: fonts/TrajanPro_Bold.ttf
+  #         weight: 700
+  #
+  # For details regarding fonts from package dependencies,
+  # see https://flutter.dev/custom-fonts/#from-packages

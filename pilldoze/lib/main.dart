@@ -5,6 +5,8 @@ import 'package:intl/intl.dart'; // Required for date/time formatting
 import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 import 'dart:convert'; // Import dart:convert for JSON encoding/decoding
 import 'dart:async'; // Import async for StreamController
+import 'package:flutter/services.dart'; // Required for PlatformException
+import 'package:permission_handler/permission_handler.dart'; // Import permission_handler
 
 void main() {
   runApp(MyApp());
@@ -31,6 +33,7 @@ class MyApp extends StatelessWidget {
 class BluetoothConnectScreen extends StatefulWidget {
   @override
   _BluetoothConnectScreenState createState() => _BluetoothConnectScreenState();
+  // Removed the duplicate createState and closing brace here
 }
 
 class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
@@ -50,16 +53,22 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
   // Stream getter for other screens to listen to
   Stream<String> get messageStream => _messageController.stream;
 
+  // Subscription for Bluetooth state changes
+  StreamSubscription<BluetoothState>? _bluetoothStateSubscription;
+
 
   @override
   void initState() {
     super.initState();
-    _checkBluetoothState(); // Check initial Bluetooth state
+    _requestPermissionsAndGetDevices(); // Start by requesting permissions
     // Listen to Bluetooth state changes
-    FlutterBluetoothSerial.instance.onStateChanged().listen((BluetoothState state) {
+    _bluetoothStateSubscription = FlutterBluetoothSerial.instance.onStateChanged().listen((BluetoothState state) {
       print("Bluetooth state changed: $state");
       if (state == BluetoothState.STATE_ON) {
-        getBondedDevices(); // Refresh devices if Bluetooth is turned on
+        // If Bluetooth is turned on, attempt to get bonded devices after a short delay
+        Future.delayed(Duration(milliseconds: 500), () { // Add a small delay
+           _requestPermissionsAndGetDevices(); // Re-run the permission check and get devices
+        });
       } else {
         // If Bluetooth turns off, update connection status and state
         if (mounted) {
@@ -79,30 +88,6 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
     });
   }
 
-  // Check if Bluetooth is enabled, request if not
-  Future<void> _checkBluetoothState() async {
-    BluetoothState state = await FlutterBluetoothSerial.instance.state;
-    print("Initial Bluetooth state: $state");
-    if (state == BluetoothState.STATE_OFF) {
-      if (mounted) {
-        setState(() {
-          connectionStatus = 'Bluetooth is off. Please turn it on.';
-        });
-      }
-      // Optionally request user to enable Bluetooth
-      // await FlutterBluetoothSerial.instance.requestEnable();
-      // You might want to re-check state after requestEnable
-    } else if (state == BluetoothState.STATE_ON) {
-      getBondedDevices(); // Get devices if Bluetooth is on
-    } else {
-      if (mounted) {
-        setState(() {
-          connectionStatus = 'Bluetooth state: $state. Required: ON';
-        });
-      }
-    }
-  }
-
 
   @override
   void dispose() {
@@ -114,9 +99,117 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
     }
     connection = null;
     _messageController.close(); // Close the stream controller
+    _bluetoothStateSubscription?.cancel(); // Cancel the state subscription
     super.dispose();
   }
 
+  // --- START: Explicit Permission Request and Device Getting ---
+  Future<void> _requestPermissionsAndGetDevices() async {
+    print("Requesting Bluetooth and Location permissions...");
+    setState(() {
+      connectionStatus = 'Requesting permissions...';
+      devicesList = []; // Clear previous list
+      selectedDevice = null; // Reset selection
+    });
+
+    // Request Bluetooth permissions (including BLUETOOTH_SCAN and BLUETOOTH_CONNECT)
+    // and Location permission for scanning on newer Android versions.
+    Map<Permission, PermissionStatus> statuses = await [
+      Permission.bluetoothScan,
+      Permission.bluetoothConnect,
+      Permission.location, // Location is required for scanning on newer Android
+    ].request();
+
+    // Check the status of each permission
+    bool allPermissionsGranted = true;
+    statuses.forEach((permission, status) {
+      if (!status.isGranted) {
+        print("Permission not granted: ${permission.toString()} - ${status.toString()}");
+        allPermissionsGranted = false;
+      }
+    });
+
+    if (mounted) {
+      if (allPermissionsGranted) {
+        print("All required permissions granted.");
+        // Permissions granted, now check Bluetooth state and get devices
+        // Add a small delay here to allow the system to process the permission grant
+        Future.delayed(Duration(milliseconds: 300), () { // Added delay
+           _checkBluetoothStateAndGetDevices(); // Call the function to check state and get devices
+        });
+      } else {
+        // Permissions not granted
+        setState(() {
+          connectionStatus = 'Permissions denied. Cannot scan for devices.';
+        });
+        print("Required permissions not granted.");
+         // Optionally show a dialog explaining why permissions are needed and how to grant them
+         // openAppSettings(); // Opens app settings for the user to manually grant permissions
+      }
+    }
+  }
+
+  // Check if Bluetooth is enabled and then get bonded devices (called AFTER permissions are granted)
+  Future<void> _checkBluetoothStateAndGetDevices() async {
+    print("Checking Bluetooth state and getting devices (after permissions)...");
+    setState(() {
+      connectionStatus = 'Checking Bluetooth state...';
+      devicesList = []; // Clear previous list
+      selectedDevice = null; // Reset selection
+    });
+
+    try {
+      BluetoothState state = await FlutterBluetoothSerial.instance.state;
+      print("Current Bluetooth state: $state");
+
+      if (state == BluetoothState.STATE_OFF) {
+         if (mounted) {
+           setState(() {
+             connectionStatus = 'Bluetooth is off. Please turn it on.';
+           });
+         }
+         print("Bluetooth is OFF.");
+         // Optionally request user to enable Bluetooth here if desired
+         // bool? isEnabled = await FlutterBluetoothSerial.instance.requestEnable();
+         // if (isEnabled ?? false) {
+         //    // If enabled, the onStateChanged listener will trigger getBondedDevices
+         // } else {
+         //    // User denied enabling Bluetooth
+         // }
+         return;
+      } else if (state == BluetoothState.STATE_ON) {
+        // Bluetooth is ON, proceed to get bonded devices
+        await getBondedDevices();
+      } else {
+        // Bluetooth is in an intermediate state
+        if (mounted) {
+          setState(() {
+            connectionStatus = 'Bluetooth state: $state. Waiting for ON state.';
+          });
+        }
+        print("Bluetooth is in state: $state. Waiting for ON.");
+        // The onStateChanged listener will handle the transition to ON
+      }
+    } on PlatformException catch (e) {
+        // Catch PlatformException specifically for permission errors
+        if (mounted) {
+          setState(() {
+            connectionStatus = 'Permission Error: ${e.message ?? e.toString()}. Please grant Bluetooth permissions.';
+          });
+        }
+        print("PlatformException getting bonded devices: $e");
+         // Optionally request permissions again here if needed,
+         // but with explicit handling, this should be less likely here.
+    } catch (e) {
+        // Catch any other errors
+        if (mounted) {
+          setState(() {
+            connectionStatus = 'Error getting devices: ${e.toString()}';
+          });
+        }
+        print("Error getting bonded devices: $e");
+    }
+  }
 
   Future<void> getBondedDevices() async {
     print("Attempting to get bonded devices...");
@@ -126,7 +219,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
       selectedDevice = null; // Reset selection
     });
     try {
-      // Ensure Bluetooth is on before getting devices
+      // Ensure Bluetooth is still on before getting devices (double check)
       BluetoothState state = await FlutterBluetoothSerial.instance.state;
       if (state != BluetoothState.STATE_ON) {
          if (mounted) {
@@ -148,15 +241,28 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
         });
         print("Found ${devices.length} bonded devices.");
       }
-    } catch (e) {
+    } on PlatformException catch (e) {
+        // Catch PlatformException specifically for permission errors
         if (mounted) {
           setState(() {
-            connectionStatus = 'Error getting devices: $e';
+            connectionStatus = 'Permission Error: ${e.message ?? e.toString()}. Please grant Bluetooth permissions.';
+          });
+        }
+        print("PlatformException getting bonded devices: $e");
+         // Optionally request permissions again here if needed,
+         // but with explicit handling, this should be less likely here.
+    } catch (e) {
+        // Catch any other errors
+        if (mounted) {
+          setState(() {
+            connectionStatus = 'Error getting devices: ${e.toString()}';
           });
         }
         print("Error getting bonded devices: $e");
     }
   }
+  // --- END: Explicit Permission Request and Device Getting ---
+
 
   void _connectToDevice() async {
     if (selectedDevice == null) {
@@ -240,25 +346,49 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
               setState(() {
                 isConnected = false;
                 isConnecting = false;
-                connectionStatus = 'Connection Error: $error';
+                connectionStatus = 'Connection Error: ${error.toString()}';
                 connection = null; // Clear the connection object
               });
               // Also notify listeners about the error
-              _messageController.add('Connection Error: $error');
+              _messageController.add('Connection Error: ${error.toString()}');
             }
         },
         cancelOnError: true // Cancel subscription on error
       );
       // --- END: Listening for incoming data from Arduino ---
 
+    } on PlatformException catch (e) {
+        // Catch PlatformException specifically for connection errors
+        print("Connection failed (PlatformException): ${e.code} - ${e.message}"); // Log code and message
+        if (mounted) {
+           String userMessage = 'Connection Failed: ${e.message ?? e.toString()}'; // Default message
+
+           // --- START: Improved error message based on error code ---
+           if (e.code == 'read failed, socket might closed or timeout') {
+              userMessage = 'Connection failed. Please ensure the device is on and in range.';
+           } else if (e.code == 'connect_error') {
+              userMessage = 'Connection failed. Is the device discoverable or already connected to another device?';
+           }
+           // Add more specific checks here if you identify other common error codes
+           // --- END: Improved error message based on error code ---
+
+           setState(() {
+             isConnected = false;
+             isConnecting = false;
+             connectionStatus = userMessage; // Display the user-friendly message
+             connection = null; // Clear the connection object
+           });
+           // Notify listeners about the connection failure
+           _messageController.add(userMessage); // Send the user-friendly message to stream
+        }
     } catch (e) {
-        // Error during the connection attempt itself
+        // Catch any other errors during connection
         print("Connection failed: $e");
         if (mounted) {
          setState(() {
            isConnected = false;
            isConnecting = false;
-           connectionStatus = "Connection Failed: ${e.toString()}"; // Show specific error
+           connectionStatus = "Connection Failed: ${e.toString()}"; // Show generic error for others
            connection = null; // Clear the connection object
          });
          // Notify listeners about the connection failure
@@ -302,7 +432,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
         actions: [ // Add a refresh button
            IconButton(
              icon: Icon(Icons.refresh),
-             onPressed: isConnecting ? null : getBondedDevices, // Disable refresh while connecting
+             onPressed: isConnecting ? null : _requestPermissionsAndGetDevices, // Call the permission request function
              tooltip: 'Refresh Devices',
            )
         ],
@@ -765,7 +895,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
               ),
               TextButton(
                 // Disable save if bluetooth is not connected
-                onPressed: !_isBluetoothConnected ? null : () {
+                onPressed: !_isBluetoothConnected ? null : () async { // Marked as async
                   String name = nameController.text.trim();
                   if (name.isEmpty) {
                      ScaffoldMessenger.of(context).showSnackBar(
@@ -798,7 +928,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                   }
 
                   // Save the updated data locally
-                  _saveCompartmentData();
+                  await _saveCompartmentData();
 
                   Navigator.pop(context); // Close dialog
                 },
@@ -934,7 +1064,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
           // You can add it back if needed, perhaps in a different location or as part of a menu
           // IconButton(
           //   icon: Icon(Icons.refresh),
-          //   onPressed: isConnecting ? null : getBondedDevices,
+          //   onPressed: isConnecting ? null : _requestPermissionsAndGetDevices, // Updated to call the permission request function
           //   tooltip: 'Refresh Devices',
           // )
         ],
