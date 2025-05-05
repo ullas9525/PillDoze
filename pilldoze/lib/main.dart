@@ -144,7 +144,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
         });
         print("Required permissions not granted.");
          // Optionally show a dialog explaining why permissions are needed and how to grant them
-         // openAppSettings(); // Opens app settings for the user to manually grant permissions
+         openAppSettings(); // Opens app settings for the user to manually grant permissions
       }
     }
   }
@@ -367,7 +367,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
            if (e.code == 'read failed, socket might closed or timeout') {
               userMessage = 'Connection failed. Please ensure the device is on and in range.';
            } else if (e.code == 'connect_error') {
-              userMessage = 'Connection failed. Is the device discoverable or already connected to another device?';
+              userMessage = 'Connection failed. Maybe Device Bluetooth is off or it is connected anyother device!!';
            }
            // Add more specific checks here if you identify other common error codes
            // --- END: Improved error message based on error code ---
@@ -427,7 +427,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
   Widget build(context) { // Added context parameter
     return Scaffold(
       appBar: AppBar(
-        title: Text('Connect Pill Dispenser'),
+        title: Text('Connect Bluetooth Device'),
         centerTitle: true,
         actions: [ // Add a refresh button
            IconButton(
@@ -564,7 +564,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: Text('Set Up Compartments', style: TextStyle(fontSize: 16)), // Text color is set by foregroundColor
+                  child: Text('Configure Compartments', style: TextStyle(fontSize: 16)), // Text color is set by foregroundColor
               ),
           ],
         ),
@@ -831,7 +831,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
-            title: Text('Set Up Compartment ${index + 1}'),
+            title: Text('Configure Compartment ${index + 1}'),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -905,7 +905,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                   }
                   if (selectedTime == null) {
                      ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Please select a dispense time.')),
+                      SnackBar(content: Text('Please select a schedule time.')),
                      );
                      return;
                   }
@@ -1004,7 +1004,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
       context: context,
       builder: (context) {
         return AlertDialog(
-          title: Text('Dispenser Messages'),
+          title: Text('Messages'),
           content: Container(
             width: double.maxFinite, // Allow the dialog to take more width
             child: messageHistory.isEmpty
@@ -1051,7 +1051,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text("Pill Compartment Setup"),
+        title: Text("Pill Compartment Configuration"),
         centerTitle: true,
         actions: [
           // --- Add Message History Icon Button ---
