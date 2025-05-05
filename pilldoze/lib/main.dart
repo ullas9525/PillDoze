@@ -275,12 +275,20 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
     _messageController.add(message);
 
     // You can still add logging to confirm message content if needed
-    if (message.contains("Pill taken ✅")) {
-      print("Message contains 'Pill taken ✅'.");
-    } else if (message.contains("Error ❌ - Wrong compartment accessed:")) {
-      print("Message contains 'Error ❌ - Wrong compartment accessed:'.");
-    } else {
-      print("Received message does not match known patterns. Message: '$message'");
+    if (message.contains("Pill taken")) { // Check for "Pill taken" or "Pill taken late"
+      print("Message indicates pill was taken.");
+    } else if (message.contains("Warning! - Pill taken before schedule")) {
+      print("Message indicates pill taken before schedule.");
+    } else if (message.contains("Warning! - Wrong compartment accessed")) {
+      print("Message indicates wrong compartment accessed.");
+    } else if (message.contains("Compartment accessed, but no schedule set")) {
+      print("Message indicates compartment accessed without schedule.");
+    } else if (message.contains("Disconnected")) {
+      print("Message indicates disconnection.");
+    } else if (message.contains("Connection Error")) {
+       print("Message indicates connection error.");
+    } else if (message.contains("Updated C")) {
+       print("Message indicates schedule update confirmation.");
     }
   }
 
@@ -449,17 +457,21 @@ class CompartmentScreen extends StatefulWidget {
 
 class _CompartmentScreenState extends State<CompartmentScreen> {
   static const String _compartmentDataKey = 'compartment_data';
+  static const String _messageHistoryKey = 'message_history'; // Key for message history
 
   List<Map<String, String?>> compartmentData = List.generate(6, (i) => {
     'name': 'Compartment ${i + 1}',
     'time': null
   });
 
+  // List to store all incoming messages
+  List<String> messageHistory = [];
+
   bool _isLoading = true;
   // Track connection state locally, initialized from the passed connection
   bool _isBluetoothConnected = false;
 
-  // State variable to hold the latest message received on this screen
+  // State variable to hold the latest message received on this screen (still useful for initial display or other purposes)
   String latestArduinoMessage = 'No messages yet.';
 
   // Subscription to the message stream
@@ -472,7 +484,8 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     // Initialize local connection state from the passed connection object
     _isBluetoothConnected = widget.connection.isConnected;
     print("CompartmentScreen initState. Initial connection state: $_isBluetoothConnected");
-    _loadCompartmentData(); // Load saved data
+    _loadCompartmentData(); // Load saved compartment data
+    _loadMessageHistory(); // Load saved message history
 
     // --- START: Listening to the message stream from BluetoothConnectScreen ---
     _messageSubscription = widget.messageStream.listen((message) {
@@ -485,6 +498,15 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     onDone: () {
       print("CompartmentScreen: Message stream closed.");
       // Handle stream closure if necessary
+       if (mounted) {
+         setState(() {
+           _isBluetoothConnected = false; // Update local connection state
+           latestArduinoMessage = 'Disconnected.'; // Update message on disconnection
+         });
+         ScaffoldMessenger.of(context).showSnackBar(
+           SnackBar(content: Text('Bluetooth Disconnected! Cannot send data.'), backgroundColor: Colors.red),
+         );
+       }
     });
     // --- END: Listening to the message stream from BluetoothConnectScreen ---
   }
@@ -506,16 +528,33 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
       return;
     }
 
-    // Update the state variable with the latest message
+    // Add the new message to the history
     setState(() {
-      latestArduinoMessage = message;
+      messageHistory.add(message);
+      latestArduinoMessage = message; // Keep latest message updated if needed elsewhere
     });
 
-    // You can still add logging to confirm message content if needed
-    if (message.contains("Pill taken ✅")) {
-      print("CompartmentScreen: Message contains 'Pill taken ✅'.");
-    } else if (message.contains("Error ❌ - Wrong compartment accessed:")) {
-      print("CompartmentScreen: Message contains 'Error ❌ - Wrong compartment accessed:'.");
+    // Save the updated message history
+    _saveMessageHistory();
+
+    // You can add specific UI responses here based on the message content if needed
+    if (message.contains("Pill taken")) { // Covers "Pill taken" and "Pill taken late"
+       ScaffoldMessenger.of(context).showSnackBar(
+         SnackBar(content: Text('Pill taken successfully!'), backgroundColor: Colors.green),
+       );
+    } else if (message.contains("Warning! - Pill taken before schedule")) {
+       ScaffoldMessenger.of(context).showSnackBar(
+         SnackBar(content: Text('Warning: Pill taken before schedule!'), backgroundColor: Colors.orange),
+       );
+    } else if (message.contains("Warning! - Wrong compartment accessed")) {
+       ScaffoldMessenger.of(context).showSnackBar(
+         SnackBar(content: Text('Warning: Wrong compartment accessed!'), backgroundColor: Colors.red),
+       );
+    } else if (message.contains("Compartment accessed, but no schedule set")) {
+       // Optional: Show a less critical message for accessing unscheduled compartments
+       // ScaffoldMessenger.of(context).showSnackBar(
+       //   SnackBar(content: Text('Compartment accessed (no schedule set).')),
+       // );
     } else if (message.contains("Disconnected")) {
       print("CompartmentScreen: Message indicates disconnection.");
       setState(() {
@@ -529,6 +568,45 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     }
   }
   // --- END: Handle incoming messages from Arduino and update the message display on THIS screen ---
+
+  // --- START: Message History Persistence ---
+  Future<void> _loadMessageHistory() async {
+    print("CompartmentScreen: Attempting to load message history...");
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    final List<String>? savedHistory = prefs.getStringList(_messageHistoryKey);
+    if (mounted && savedHistory != null) {
+      setState(() {
+        messageHistory = savedHistory;
+      });
+      print("CompartmentScreen: Successfully loaded ${messageHistory.length} messages.");
+    } else {
+       print("CompartmentScreen: No saved message history found.");
+    }
+  }
+
+  Future<void> _saveMessageHistory() async {
+    print("CompartmentScreen: Attempting to save message history...");
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList(_messageHistoryKey, messageHistory);
+    print("CompartmentScreen: Message history saved (${messageHistory.length} messages).");
+  }
+
+  void _clearMessageHistory() async {
+    print("CompartmentScreen: Attempting to clear message history...");
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_messageHistoryKey);
+    if (mounted) {
+      setState(() {
+        messageHistory.clear();
+        latestArduinoMessage = 'No messages yet.'; // Reset latest message display
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Message history cleared.')),
+      );
+      print("CompartmentScreen: Message history cleared.");
+    }
+  }
+  // --- END: Message History Persistence ---
 
 
   Future<void> _loadCompartmentData() async {
@@ -584,6 +662,30 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     final String saveDataJson = jsonEncode(compartmentData);
     await prefs.setString(_compartmentDataKey, saveDataJson);
     print("CompartmentScreen: Compartment data saved.");
+  }
+
+  // --- Function to delete compartment data ---
+  void _deleteCompartmentData(int index) async {
+     // Send a message to Arduino to clear the schedule for this compartment
+     // Using empty name and -1:-1 time as a signal for deletion
+     _sendToArduino(index, "", "-1:-1");
+
+     // Update local state
+     if (mounted) {
+       setState(() {
+         compartmentData[index]['name'] = 'Compartment ${index + 1}'; // Reset name to default
+         compartmentData[index]['time'] = null; // Clear time
+       });
+     }
+
+     // Save updated data locally
+     await _saveCompartmentData();
+
+     // Provide user feedback
+     ScaffoldMessenger.of(context).showSnackBar(
+       SnackBar(content: Text('Compartment ${index + 1} schedule deleted.')),
+     );
+     print("Compartment ${index + 1} data deleted.");
   }
 
 
@@ -648,6 +750,15 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
               ),
             ),
             actions: [
+              // --- Add Delete Button ---
+              if (compartmentData[index]['time'] != null) // Only show delete if time is set
+                TextButton(
+                  onPressed: !_isBluetoothConnected ? null : () {
+                     Navigator.pop(context); // Close dialog first
+                     _deleteCompartmentData(index); // Call the delete function
+                  },
+                  child: Text('Delete', style: TextStyle(color: Colors.red)),
+                ),
               TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: Text('Cancel'),
@@ -701,7 +812,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
   }
 
   TimeOfDay? _parseTime(String? timeString) {
-    if (timeString == null || timeString.isEmpty) return null;
+    if (timeString == null || timeString.isEmpty || timeString == "-1:-1") return null; // Also check for "-1:-1"
     try {
       final format = DateFormat('HH:mm');
       final dt = format.parse(timeString);
@@ -727,6 +838,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     }
 
     String compartmentCode = 'C${index + 1}';
+    // Send empty name and -1:-1 time for deletion
     String message = '$compartmentCode|$name|$time\n';
     print("CompartmentScreen: Attempting to send message: $message");
     try {
@@ -735,7 +847,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
          print('CompartmentScreen: Successfully sent to Arduino: $message');
          // Removed SnackBar here
       }).catchError((error) {
-         print("CompartmentScreen: Error confirming data send: $error");
+         print("CompartmentScreen: Error confirming send: $error");
          if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
              SnackBar(content: Text('Error confirming send: $error'), backgroundColor: Colors.red),
@@ -756,6 +868,51 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     }
   }
 
+  // --- NEW: Function to show the message history dialog ---
+  void _showMessageHistoryDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return AlertDialog(
+          title: Text('Dispenser Messages'),
+          content: Container(
+            width: double.maxFinite, // Allow the dialog to take more width
+            child: messageHistory.isEmpty
+                ? Center(child: Text('No messages yet.'))
+                : ListView.builder(
+                    shrinkWrap: true, // Important for ListView inside AlertDialog
+                    itemCount: messageHistory.length,
+                    itemBuilder: (context, index) {
+                      // Display messages in reverse order (latest first)
+                      final message = messageHistory[messageHistory.length - 1 - index];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4.0),
+                        child: Text(message),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            // --- Add Delete All Messages Button ---
+            if (messageHistory.isNotEmpty)
+              TextButton(
+                onPressed: () {
+                  _clearMessageHistory();
+                  Navigator.pop(context); // Close the dialog after clearing
+                },
+                child: Text('Clear All', style: TextStyle(color: Colors.red)),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: Text('Close'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+
   @override
   Widget build(BuildContext context) {
     // Update local connection state based on the widget's connection property
@@ -766,6 +923,21 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
       appBar: AppBar(
         title: Text("Pill Compartment Setup"),
         centerTitle: true,
+        actions: [
+          // --- Add Message History Icon Button ---
+          IconButton(
+            icon: Icon(Icons.message), // Message icon
+            onPressed: _showMessageHistoryDialog, // Call the dialog function on press
+            tooltip: 'View Messages',
+          ),
+          // Removed the refresh button from here, assuming message history is more important
+          // You can add it back if needed, perhaps in a different location or as part of a menu
+          // IconButton(
+          //   icon: Icon(Icons.refresh),
+          //   onPressed: isConnecting ? null : getBondedDevices,
+          //   tooltip: 'Refresh Devices',
+          // )
+        ],
       ),
       body: _isLoading
             ? Center(child: CircularProgressIndicator())
@@ -783,7 +955,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                        textAlign: TextAlign.center,
                      ),
                    ),
-                // List view takes remaining space (Kept above the message card)
+                // List view takes remaining space
                 Expanded(
                   child: ListView.builder(
                     padding: EdgeInsets.all(10),
@@ -813,29 +985,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                     },
                   ),
                 ),
-                // Display Latest Arduino Message (Moved below the list)
-                Card(
-                  elevation: 2,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  margin: EdgeInsets.symmetric(horizontal: 10, vertical: 5), // Add some margin
-                  child: Padding(
-                    padding: const EdgeInsets.all(15.0),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Latest Dispenser Message:',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                        ),
-                        SizedBox(height: 8),
-                        Text(
-                          latestArduinoMessage,
-                          style: TextStyle(fontSize: 14),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
+                // Removed the latest Arduino message display card from here
               ],
             ),
     );
