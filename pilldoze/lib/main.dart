@@ -846,7 +846,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                     textCapitalization: TextCapitalization.words,
                   ),
                   SizedBox(height: 15),
-                  Text("Dispense Time:", style: TextStyle(fontWeight: FontWeight.bold)),
+                  Text("Schedule Time:", style: TextStyle(fontWeight: FontWeight.bold)),
                   SizedBox(height: 5),
                   InkWell(
                     onTap: () async {
