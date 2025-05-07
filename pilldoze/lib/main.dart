@@ -19,11 +19,16 @@ class MyApp extends StatelessWidget {
       home: BluetoothConnectScreen(),
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
-        // Changed the primary swatch color to light blue
         primarySwatch: Colors.lightBlue,
         visualDensity: VisualDensity.adaptivePlatformDensity,
-        // Define error color for consistency using the new primary swatch
         colorScheme: ColorScheme.fromSwatch(primarySwatch: Colors.lightBlue).copyWith(error: Colors.redAccent),
+        chipTheme: ChipThemeData( // Added ChipTheme for styling day selectors
+          backgroundColor: Colors.grey[300],
+          selectedColor: Colors.lightBlue[400],
+          labelStyle: TextStyle(color: Colors.black),
+          secondaryLabelStyle: TextStyle(color: Colors.white),
+          padding: EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+        ),
       ),
     );
   }
@@ -33,7 +38,6 @@ class MyApp extends StatelessWidget {
 class BluetoothConnectScreen extends StatefulWidget {
   @override
   _BluetoothConnectScreenState createState() => _BluetoothConnectScreenState();
-  // Removed the duplicate createState and closing brace here
 }
 
 class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
@@ -43,84 +47,65 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
   bool isConnecting = false;
   bool isConnected = false;
   String connectionStatus = '';
-
-  // Buffer for incoming data
   String _incomingDataBuffer = "";
-
-  // StreamController to send messages to other screens
   final StreamController<String> _messageController = StreamController<String>.broadcast();
-
-  // Stream getter for other screens to listen to
   Stream<String> get messageStream => _messageController.stream;
-
-  // Subscription for Bluetooth state changes
   StreamSubscription<BluetoothState>? _bluetoothStateSubscription;
-
 
   @override
   void initState() {
     super.initState();
-    _requestPermissionsAndGetDevices(); // Start by requesting permissions
-    // Listen to Bluetooth state changes
+    _requestPermissionsAndGetDevices();
     _bluetoothStateSubscription = FlutterBluetoothSerial.instance.onStateChanged().listen((BluetoothState state) {
       print("Bluetooth state changed: $state");
       if (state == BluetoothState.STATE_ON) {
-        // If Bluetooth is turned on, attempt to get bonded devices after a short delay
-        Future.delayed(Duration(milliseconds: 500), () { // Add a small delay
-           _requestPermissionsAndGetDevices(); // Re-run the permission check and get devices
+        Future.delayed(Duration(milliseconds: 500), () {
+           _requestPermissionsAndGetDevices();
         });
       } else {
-        // If Bluetooth turns off, update connection status and state
         if (mounted) {
           setState(() {
             isConnected = false;
             isConnecting = false;
             connectionStatus = 'Bluetooth is off. Please turn it on.';
-            connection?.dispose(); // Dispose existing connection if Bluetooth is off
+            connection?.dispose();
             connection = null;
-            devicesList = []; // Clear device list
-            selectedDevice = null; // Clear selected device
+            devicesList = [];
+            selectedDevice = null;
           });
-          // Also notify listeners that connection is lost
           _messageController.add('Bluetooth Disconnected.');
         }
       }
     });
   }
 
-
   @override
   void dispose() {
-    // Avoid memory leaks by disconnecting and disposing the connection when the screen is disposed.
     print("BluetoothConnectScreen dispose called.");
-    if (connection?.isConnected ?? false) { // Check isConnected before disposing
+    if (connection?.isConnected ?? false) {
       print("Disconnecting Bluetooth connection on dispose.");
       connection?.dispose();
     }
     connection = null;
-    _messageController.close(); // Close the stream controller
-    _bluetoothStateSubscription?.cancel(); // Cancel the state subscription
+    _messageController.close();
+    _bluetoothStateSubscription?.cancel();
     super.dispose();
   }
 
-  // --- START: Explicit Permission Request and Device Getting ---
   Future<void> _requestPermissionsAndGetDevices() async {
     print("Requesting Bluetooth and Location permissions...");
     setState(() {
       connectionStatus = 'Requesting permissions...';
-      devicesList = []; // Clear previous list
-      selectedDevice = null; // Reset selection
+      devicesList = [];
+      selectedDevice = null;
     });
 
-    // Request Bluetooth permissions (including BLUETOOTH_SCAN and BLUETOOTH_CONNECT)
-    // and Location permission for scanning on newer Android versions.
     Map<Permission, PermissionStatus> statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
-      Permission.location, // Location is required for scanning on newer Android
+      Permission.location,
     ].request();
 
-    // Check the status of each permission
     bool allPermissionsGranted = true;
     statuses.forEach((permission, status) {
       if (!status.isGranted) {
@@ -132,30 +117,25 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
     if (mounted) {
       if (allPermissionsGranted) {
         print("All required permissions granted.");
-        // Permissions granted, now check Bluetooth state and get devices
-        // Add a small delay here to allow the system to process the permission grant
-        Future.delayed(Duration(milliseconds: 300), () { // Added delay
-           _checkBluetoothStateAndGetDevices(); // Call the function to check state and get devices
+        Future.delayed(Duration(milliseconds: 300), () {
+           _checkBluetoothStateAndGetDevices();
         });
       } else {
-        // Permissions not granted
         setState(() {
           connectionStatus = 'Permissions denied. Cannot scan for devices.';
         });
         print("Required permissions not granted.");
-         // Optionally show a dialog explaining why permissions are needed and how to grant them
-         openAppSettings(); // Opens app settings for the user to manually grant permissions
+         openAppSettings();
       }
     }
   }
 
-  // Check if Bluetooth is enabled and then get bonded devices (called AFTER permissions are granted)
   Future<void> _checkBluetoothStateAndGetDevices() async {
     print("Checking Bluetooth state and getting devices (after permissions)...");
     setState(() {
       connectionStatus = 'Checking Bluetooth state...';
-      devicesList = []; // Clear previous list
-      selectedDevice = null; // Reset selection
+      devicesList = [];
+      selectedDevice = null;
     });
 
     try {
@@ -169,39 +149,25 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
            });
          }
          print("Bluetooth is OFF.");
-         // Optionally request user to enable Bluetooth here if desired
-         // bool? isEnabled = await FlutterBluetoothSerial.instance.requestEnable();
-         // if (isEnabled ?? false) {
-         //    // If enabled, the onStateChanged listener will trigger getBondedDevices
-         // } else {
-         //    // User denied enabling Bluetooth
-         // }
          return;
       } else if (state == BluetoothState.STATE_ON) {
-        // Bluetooth is ON, proceed to get bonded devices
         await getBondedDevices();
       } else {
-        // Bluetooth is in an intermediate state
         if (mounted) {
           setState(() {
             connectionStatus = 'Bluetooth state: $state. Waiting for ON state.';
           });
         }
         print("Bluetooth is in state: $state. Waiting for ON.");
-        // The onStateChanged listener will handle the transition to ON
       }
     } on PlatformException catch (e) {
-        // Catch PlatformException specifically for permission errors
         if (mounted) {
           setState(() {
             connectionStatus = 'Permission Error: ${e.message ?? e.toString()}. Please grant Bluetooth permissions.';
           });
         }
         print("PlatformException getting bonded devices: $e");
-         // Optionally request permissions again here if needed,
-         // but with explicit handling, this should be less likely here.
     } catch (e) {
-        // Catch any other errors
         if (mounted) {
           setState(() {
             connectionStatus = 'Error getting devices: ${e.toString()}';
@@ -215,11 +181,10 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
     print("Attempting to get bonded devices...");
     setState(() {
       connectionStatus = 'Getting bonded devices...';
-      devicesList = []; // Clear previous list
-      selectedDevice = null; // Reset selection
+      devicesList = [];
+      selectedDevice = null;
     });
     try {
-      // Ensure Bluetooth is still on before getting devices (double check)
       BluetoothState state = await FlutterBluetoothSerial.instance.state;
       if (state != BluetoothState.STATE_ON) {
          if (mounted) {
@@ -233,7 +198,6 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
 
       List<BluetoothDevice> devices =
           await FlutterBluetoothSerial.instance.getBondedDevices();
-      // Check if the widget is still mounted before updating state
       if (mounted) {
         setState(() {
           devicesList = devices;
@@ -242,17 +206,13 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
         print("Found ${devices.length} bonded devices.");
       }
     } on PlatformException catch (e) {
-        // Catch PlatformException specifically for permission errors
         if (mounted) {
           setState(() {
             connectionStatus = 'Permission Error: ${e.message ?? e.toString()}. Please grant Bluetooth permissions.';
           });
         }
         print("PlatformException getting bonded devices: $e");
-         // Optionally request permissions again here if needed,
-         // but with explicit handling, this should be less likely here.
     } catch (e) {
-        // Catch any other errors
         if (mounted) {
           setState(() {
             connectionStatus = 'Error getting devices: ${e.toString()}';
@@ -261,8 +221,6 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
         print("Error getting bonded devices: $e");
     }
   }
-  // --- END: Explicit Permission Request and Device Getting ---
-
 
   void _connectToDevice() async {
     if (selectedDevice == null) {
@@ -273,7 +231,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
     }
     if (isConnecting || isConnected) {
       print("Connection attempt blocked: isConnecting=$isConnecting, isConnected=$isConnected");
-      return; // Prevent multiple connection attempts or if already connected
+      return;
     }
 
     setState(() {
@@ -283,20 +241,18 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
     print("Attempting to connect to ${selectedDevice!.address}");
 
     try {
-      // Dispose any existing connection before creating a new one
       if (connection?.isConnected ?? false) {
         print("Disposing existing connection before new attempt.");
         connection?.dispose();
       }
-      connection = null; // Ensure connection is null before assignment
+      connection = null;
 
       BluetoothConnection newConnection =
           await BluetoothConnection.toAddress(selectedDevice!.address);
 
-      // Check if still mounted after await
       if (!mounted) {
           print("Widget unmounted after connection attempt, disposing new connection.");
-          newConnection.dispose(); // Dispose if widget is gone
+          newConnection.dispose();
           return;
       }
 
@@ -308,131 +264,91 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
       });
       print("Successfully connected to ${selectedDevice!.address}");
 
-      // --- START: Listening for incoming data from Arduino ---
-      // This is the *only* listener for the Bluetooth input stream
       connection?.input?.listen(
         (Uint8List data) {
-          // Convert incoming data to a string and add to buffer
           String incomingString = String.fromCharCodes(data);
           _incomingDataBuffer += incomingString;
-
-          // Process complete messages (ending with newline)
           int newlineIndex;
           while ((newlineIndex = _incomingDataBuffer.indexOf('\n')) != -1) {
             String message = _incomingDataBuffer.substring(0, newlineIndex).trim();
             _incomingDataBuffer = _incomingDataBuffer.substring(newlineIndex + 1);
-
-            _handleIncomingMessage(message); // Call method to handle the message
+            _handleIncomingMessage(message);
           }
         },
         onDone: () {
-          // Connection closed
           print("Bluetooth connection closed (onDone triggered on ConnectScreen).");
           if (mounted) {
             setState(() {
               isConnected = false;
               isConnecting = false;
               connectionStatus = 'Device disconnected.';
-              connection = null; // Clear the connection object
+              connection = null;
             });
-            // Also notify listeners that connection is lost
             _messageController.add('Device disconnected.');
           }
         },
         onError: (error) {
-            // Error on the connection stream
             print("Bluetooth connection error on ConnectScreen: $error");
             if (mounted) {
               setState(() {
                 isConnected = false;
                 isConnecting = false;
                 connectionStatus = 'Connection Error: ${error.toString()}';
-                connection = null; // Clear the connection object
+                connection = null;
               });
-              // Also notify listeners about the error
               _messageController.add('Connection Error: ${error.toString()}');
             }
         },
-        cancelOnError: true // Cancel subscription on error
+        cancelOnError: true
       );
-      // --- END: Listening for incoming data from Arduino ---
 
     } on PlatformException catch (e) {
-        // Catch PlatformException specifically for connection errors
-        print("Connection failed (PlatformException): ${e.code} - ${e.message}"); // Log code and message
+        print("Connection failed (PlatformException): ${e.code} - ${e.message}");
         if (mounted) {
-           String userMessage = 'Connection Failed: ${e.message ?? e.toString()}'; // Default message
-
-           // --- START: Improved error message based on error code ---
+           String userMessage = 'Connection Failed: ${e.message ?? e.toString()}';
            if (e.code == 'read failed, socket might closed or timeout') {
               userMessage = 'Connection failed. Please ensure the device is on and in range.';
            } else if (e.code == 'connect_error') {
               userMessage = 'Connection failed. Maybe Device Bluetooth is off or it is connected anyother device!!';
            }
-           // Add more specific checks here if you identify other common error codes
-           // --- END: Improved error message based on error code ---
-
            setState(() {
              isConnected = false;
              isConnecting = false;
-             connectionStatus = userMessage; // Display the user-friendly message
-             connection = null; // Clear the connection object
+             connectionStatus = userMessage;
+             connection = null;
            });
-           // Notify listeners about the connection failure
-           _messageController.add(userMessage); // Send the user-friendly message to stream
+           _messageController.add(userMessage);
         }
     } catch (e) {
-        // Catch any other errors during connection
         print("Connection failed: $e");
         if (mounted) {
          setState(() {
            isConnected = false;
            isConnecting = false;
-           connectionStatus = "Connection Failed: ${e.toString()}"; // Show generic error for others
-           connection = null; // Clear the connection object
+           connectionStatus = "Connection Failed: ${e.toString()}";
+           connection = null;
          });
-         // Notify listeners about the connection failure
          _messageController.add("Connection Failed: ${e.toString()}");
         }
     }
   }
 
-   // Handle incoming messages from Arduino and add to the stream
   void _handleIncomingMessage(String message) {
-    print("Received message from Arduino: '$message'"); // Print the exact received message
-
-    // Add the message to the stream controller
+    print("Received message from Arduino: '$message'");
     _messageController.add(message);
-
-    // You can still add logging to confirm message content if needed
-    if (message.contains("Pill taken")) { // Check for "Pill taken" or "Pill taken late"
-      print("Message indicates pill was taken.");
-    } else if (message.contains("Warning! - Pill taken before schedule")) {
-      print("Message indicates pill taken before schedule.");
-    } else if (message.contains("Warning! - Wrong compartment accessed")) {
-      print("Message indicates wrong compartment accessed.");
-    } else if (message.contains("Compartment accessed, but no schedule set")) {
-      print("Message indicates compartment accessed without schedule.");
-    } else if (message.contains("Disconnected")) {
-      print("Message indicates disconnection.");
-    } else if (message.contains("Connection Error")) {
-       print("Message indicates connection error.");
-    } else if (message.contains("Updated C")) {
-       print("Message indicates schedule update confirmation.");
-    }
+    // Further handling can be done on the CompartmentScreen or here if needed
   }
 
-
   @override
-  Widget build(context) { // Added context parameter
+  Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text('Connect Bluetooth Device'),
         centerTitle: true,
-        actions: [ // Add a refresh button
+        actions: [
            IconButton(
              icon: Icon(Icons.refresh),
-             onPressed: isConnecting ? null : _requestPermissionsAndGetDevices, // Call the permission request function
+             onPressed: isConnecting ? null : _requestPermissionsAndGetDevices,
              tooltip: 'Refresh Devices',
            )
         ],
@@ -443,7 +359,6 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Display connection status
             if (connectionStatus.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(bottom: 15.0),
@@ -453,8 +368,6 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                   style: TextStyle(fontSize: 16, color: isConnected ? Colors.green : Theme.of(context).colorScheme.error ),
                 ),
               ),
-
-            // --- Dropdown for selecting device ---
             Card(
               elevation: 2,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -465,7 +378,6 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                     isExpanded: true,
                     hint: Center(child: Text("Select Bluetooth Device")),
                     value: selectedDevice,
-                    // Disable dropdown if connecting or connected to prevent changes during process
                     disabledHint: selectedDevice != null ? Center(child: Text(selectedDevice!.name ?? selectedDevice!.address)) : null,
                     items: devicesList.map((device) {
                       return DropdownMenuItem(
@@ -473,11 +385,10 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                         value: device,
                       );
                     }).toList(),
-                    onChanged: (isConnecting || isConnected) ? null : (device) { // Disable onChanged when connecting/connected
+                    onChanged: (isConnecting || isConnected) ? null : (device) {
                       setState(() {
                         selectedDevice = device;
-                        connectionStatus = ''; // Clear status on new selection
-                        // Don't reset connection state here, let connect button handle it
+                        connectionStatus = '';
                       });
                     },
                     alignment: AlignmentDirectional.center,
@@ -486,8 +397,6 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
               ),
             ),
             SizedBox(height: 20),
-
-            // --- Connect Button ---
             ElevatedButton(
               onPressed: (selectedDevice == null || isConnecting || isConnected) ? null : _connectToDevice,
               style: ElevatedButton.styleFrom(
@@ -495,10 +404,8 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(10),
                 ),
-                // Background color is the primary color (light blue)
                 backgroundColor: isConnected ? Colors.grey : Theme.of(context).primaryColor,
-                disabledBackgroundColor: Colors.grey[400], // Style for disabled state
-                // Set text color to black for visibility
+                disabledBackgroundColor: Colors.grey[400],
                 foregroundColor: Colors.black,
               ),
               child: isConnecting
@@ -506,22 +413,17 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                       height: 20,
                       width: 20,
                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Text(isConnected ? 'Connected' : 'Connect', style: TextStyle(fontSize: 16)), // Text color is set by foregroundColor
+                  : Text(isConnected ? 'Connected' : 'Connect', style: TextStyle(fontSize: 16)),
             ),
             SizedBox(height: 15),
-
-            // Removed the latest Arduino message display from here
-
-            // --- Continue Button (only shown if connected) ---
-            if (isConnected && connection != null) // Also check if connection object is not null
+            if (isConnected && connection != null)
               ElevatedButton(
                 onPressed: () {
-                  // Ensure connection object exists and is connected before navigating
                   if (connection == null || !isConnected) {
                        if (mounted) {
                          setState(() {
                            connectionStatus = "Connection lost. Please reconnect.";
-                           isConnected = false; // Update state
+                           isConnected = false;
                          });
                        }
                        print("Attempted to navigate but connection is null or not connected.");
@@ -531,16 +433,12 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      // Pass the connection AND the message stream
                       builder: (_) => CompartmentScreen(
                         connection: connection!,
                         messageStream: messageStream,
                       ),
                     ),
                   ).then((_) {
-                    // When returning from CompartmentScreen, check connection status again
-                    // The listener in _connectToDevice should handle actual disconnection,
-                    // but this ensures UI consistency if state somehow diverged.
                     print("Returned from CompartmentScreen.");
                     if (mounted && !(connection?.isConnected ?? false)) {
                        print("Connection found disconnected upon returning.");
@@ -555,16 +453,14 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                   });
                 },
                   style: ElevatedButton.styleFrom(
-                    // Keep background color green
                     backgroundColor: Colors.green,
-                    // Set text color to black
                     foregroundColor: Colors.black,
                     padding: EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10),
                     ),
                   ),
-                  child: Text('Configure Compartments', style: TextStyle(fontSize: 16)), // Text color is set by foregroundColor
+                  child: Text('Configure Compartments', style: TextStyle(fontSize: 16)),
               ),
           ],
         ),
@@ -573,11 +469,10 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
   }
 }
 
-
-// --- Compartment Setup Screen (With Persistence) ---
+// --- Compartment Setup Screen (With Persistence & Day Scheduling) ---
 class CompartmentScreen extends StatefulWidget {
   final BluetoothConnection connection;
-  final Stream<String> messageStream; // Receive the message stream
+  final Stream<String> messageStream;
 
   CompartmentScreen({required this.connection, required this.messageStream});
 
@@ -586,89 +481,77 @@ class CompartmentScreen extends StatefulWidget {
 }
 
 class _CompartmentScreenState extends State<CompartmentScreen> {
-  static const String _compartmentDataKey = 'compartment_data';
-  static const String _messageHistoryKey = 'message_history'; // Key for message history
+  static const String _compartmentDataKey = 'compartment_data_v2'; // Changed key for new structure
+  static const String _messageHistoryKey = 'message_history';
 
-  List<Map<String, String?>> compartmentData = List.generate(6, (i) => {
+  // MODIFIED: compartmentData now includes a list of bools for days
+  List<Map<String, dynamic>> compartmentData = List.generate(6, (i) => {
     'name': 'Compartment ${i + 1}',
-    'time': null
+    'time': null,
+    'days': List<bool>.filled(7, false), // Sunday to Saturday, initially all false
   });
 
-  // List to store all incoming messages
   List<String> messageHistory = [];
-
   bool _isLoading = true;
-  // Track connection state locally, initialized from the passed connection
   bool _isBluetoothConnected = false;
-
-  // State variable to hold the latest message received on this screen (still useful for initial display or other purposes)
   String latestArduinoMessage = 'No messages yet.';
-
-  // Subscription to the message stream
   StreamSubscription<String>? _messageSubscription;
 
+  // Helper for day names
+  final List<String> _dayAbbreviations = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
   @override
   void initState() {
     super.initState();
-    // Initialize local connection state from the passed connection object
     _isBluetoothConnected = widget.connection.isConnected;
     print("CompartmentScreen initState. Initial connection state: $_isBluetoothConnected");
-    _loadCompartmentData(); // Load saved compartment data
-    _loadMessageHistory(); // Load saved message history
+    _loadCompartmentData();
+    _loadMessageHistory();
 
-    // --- START: Listening to the message stream from BluetoothConnectScreen ---
     _messageSubscription = widget.messageStream.listen((message) {
-      _handleIncomingMessage(message); // Handle the message received from the stream
+      _handleIncomingMessage(message);
     },
     onError: (error) {
       print("CompartmentScreen: Error on message stream: $error");
-      // Handle errors from the stream if necessary
+      if(mounted) {
+        setState(() {
+          _isBluetoothConnected = false;
+          latestArduinoMessage = 'Stream Error. Disconnected.';
+        });
+      }
     },
     onDone: () {
       print("CompartmentScreen: Message stream closed.");
-      // Handle stream closure if necessary
        if (mounted) {
          setState(() {
-           _isBluetoothConnected = false; // Update local connection state
-           latestArduinoMessage = 'Disconnected.'; // Update message on disconnection
+           _isBluetoothConnected = false;
+           latestArduinoMessage = 'Disconnected.';
          });
          ScaffoldMessenger.of(context).showSnackBar(
            SnackBar(content: Text('Bluetooth Disconnected! Cannot send data.'), backgroundColor: Colors.red),
          );
        }
     });
-    // --- END: Listening to the message stream from BluetoothConnectScreen ---
   }
 
   @override
   void dispose() {
-    // Cancel the message stream subscription
     _messageSubscription?.cancel();
     super.dispose();
   }
 
-
-  // --- START: Handle incoming messages from Arduino and update the message display on THIS screen ---
   void _handleIncomingMessage(String message) {
-    print("CompartmentScreen received message from stream: '$message'"); // Print the exact received message
+    print("CompartmentScreen received message from stream: '$message'");
+    if (!mounted) return;
 
-    if (!mounted) {
-      print("CompartmentScreen: Handle incoming message called, but widget is not mounted.");
-      return;
-    }
-
-    // Add the new message to the history
     setState(() {
       messageHistory.add(message);
-      latestArduinoMessage = message; // Keep latest message updated if needed elsewhere
+      latestArduinoMessage = message;
     });
-
-    // Save the updated message history
     _saveMessageHistory();
 
-    // You can add specific UI responses here based on the message content if needed
-    if (message.contains("Pill taken")) { // Covers "Pill taken" and "Pill taken late"
+    // Show Snackbars for specific messages
+    if (message.contains("Pill taken")) {
        ScaffoldMessenger.of(context).showSnackBar(
          SnackBar(content: Text('Pill taken successfully!'), backgroundColor: Colors.green),
        );
@@ -680,34 +563,25 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
        ScaffoldMessenger.of(context).showSnackBar(
          SnackBar(content: Text('Warning: Wrong compartment accessed!'), backgroundColor: Colors.red),
        );
-    } else if (message.contains("Compartment accessed, but no schedule set")) {
-       // Optional: Show a less critical message for accessing unscheduled compartments
-       // ScaffoldMessenger.of(context).showSnackBar(
-       //   SnackBar(content: Text('Compartment accessed (no schedule set).')),
-       // );
     } else if (message.contains("Disconnected")) {
       print("CompartmentScreen: Message indicates disconnection.");
-      setState(() {
-        _isBluetoothConnected = false;
-      });
+      setState(() { _isBluetoothConnected = false; });
     } else if (message.contains("Connection Error")) {
        print("CompartmentScreen: Message indicates connection error.");
-       setState(() {
-         _isBluetoothConnected = false;
-       });
+       setState(() { _isBluetoothConnected = false; });
+    } else if (message.startsWith("Updated C") || message.startsWith("Cleared schedule")) {
+        ScaffoldMessenger.of(context).showSnackBar(
+         SnackBar(content: Text('Arduino: $message'), backgroundColor: Colors.blue),
+       );
     }
   }
-  // --- END: Handle incoming messages from Arduino and update the message display on THIS screen ---
 
-  // --- START: Message History Persistence ---
   Future<void> _loadMessageHistory() async {
     print("CompartmentScreen: Attempting to load message history...");
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final List<String>? savedHistory = prefs.getStringList(_messageHistoryKey);
     if (mounted && savedHistory != null) {
-      setState(() {
-        messageHistory = savedHistory;
-      });
+      setState(() { messageHistory = savedHistory; });
       print("CompartmentScreen: Successfully loaded ${messageHistory.length} messages.");
     } else {
        print("CompartmentScreen: No saved message history found.");
@@ -728,7 +602,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     if (mounted) {
       setState(() {
         messageHistory.clear();
-        latestArduinoMessage = 'No messages yet.'; // Reset latest message display
+        latestArduinoMessage = 'No messages yet.';
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Message history cleared.')),
@@ -736,14 +610,11 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
       print("CompartmentScreen: Message history cleared.");
     }
   }
-  // --- END: Message History Persistence ---
-
 
   Future<void> _loadCompartmentData() async {
-    print("CompartmentScreen: Attempting to load compartment data...");
-    // Ensure mounted check if called late
+    print("CompartmentScreen: Attempting to load compartment data (v2)...");
     if (!mounted) return;
-    setState(() { _isLoading = true; }); // Show loading indicator
+    setState(() { _isLoading = true; });
 
     final SharedPreferences prefs = await SharedPreferences.getInstance();
     final String? savedDataJson = prefs.getString(_compartmentDataKey);
@@ -751,83 +622,87 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     if (savedDataJson != null) {
       try {
         final List<dynamic> decodedList = jsonDecode(savedDataJson);
-        final List<Map<String, String?>> loadedData = decodedList.map((item) {
+        final List<Map<String, dynamic>> loadedData = decodedList.map((item) {
           if (item is Map) {
-            return Map<String, String?>.from(item.map((key, value) => MapEntry(key.toString(), value?.toString())));
+            // Ensure 'days' is correctly parsed as List<bool>
+            List<bool> daysList = List<bool>.filled(7, false);
+            if (item['days'] is List) {
+              List<dynamic> rawDays = item['days'];
+              if (rawDays.length == 7) {
+                daysList = rawDays.map((d) => d == true).toList();
+              }
+            }
+            return {
+              'name': item['name']?.toString(),
+              'time': item['time']?.toString(),
+              'days': daysList,
+            };
           }
-          return {'name': 'Error', 'time': null};
+          // Return a default structure if item is not a map
+          return {'name': 'Error', 'time': null, 'days': List<bool>.filled(7, false)};
         }).toList();
 
         if (loadedData.length == 6) {
-           // Check mounted again before setState
            if (mounted) {
-             setState(() {
-               compartmentData = loadedData;
-             });
-             print("CompartmentScreen: Successfully loaded compartment data.");
+             setState(() { compartmentData = loadedData; });
+             print("CompartmentScreen: Successfully loaded compartment data (v2).");
            }
         } else {
-           print("CompartmentScreen: Warning: Loaded data length mismatch (${loadedData.length}). Using defaults.");
-           // Optionally clear saved data if structure changed: prefs.remove(_compartmentDataKey);
+           print("CompartmentScreen: Warning: Loaded data (v2) length mismatch (${loadedData.length}). Using defaults.");
         }
-
       } catch (e) {
-         print("CompartmentScreen: Error loading compartment data: $e. Using defaults.");
-         // prefs.remove(_compartmentDataKey); // Consider clearing corrupted data
+         print("CompartmentScreen: Error loading compartment data (v2): $e. Using defaults.");
+         // Consider clearing corrupted data: prefs.remove(_compartmentDataKey);
       }
     } else {
-      print("CompartmentScreen: No saved compartment data found. Using defaults.");
+      print("CompartmentScreen: No saved compartment data (v2) found. Using defaults.");
     }
-     // Ensure mounted before final setState
      if (mounted) {
-       setState(() {
-         _isLoading = false;
-       });
+       setState(() { _isLoading = false; });
      }
   }
 
   Future<void> _saveCompartmentData() async {
-    print("CompartmentScreen: Attempting to save compartment data...");
+    print("CompartmentScreen: Attempting to save compartment data (v2)...");
     final SharedPreferences prefs = await SharedPreferences.getInstance();
+    // Ensure 'days' is stored in a JSON-compatible format (list of bools is fine)
     final String saveDataJson = jsonEncode(compartmentData);
     await prefs.setString(_compartmentDataKey, saveDataJson);
-    print("CompartmentScreen: Compartment data saved.");
+    print("CompartmentScreen: Compartment data (v2) saved.");
   }
 
-  // --- Function to delete compartment data ---
   void _deleteCompartmentData(int index) async {
      // Send a message to Arduino to clear the schedule for this compartment
-     // Using empty name and -1:-1 time as a signal for deletion
-     _sendToArduino(index, "", "-1:-1");
+     // Format: C<index>|<Name>|-1:-1|<D0,D1,D2,D3,D4,D5,D6>
+     // Name can be empty, days string is all zeros for deletion.
+     // MODIFIED: Sending empty string for days for deletion
+     _sendToArduino(index, "", "-1:-1", List<bool>.filled(7, false));
 
-     // Update local state
      if (mounted) {
        setState(() {
-         compartmentData[index]['name'] = 'Compartment ${index + 1}'; // Reset name to default
-         compartmentData[index]['time'] = null; // Clear time
+         compartmentData[index]['name'] = 'Compartment ${index + 1}';
+         compartmentData[index]['time'] = null;
+         compartmentData[index]['days'] = List<bool>.filled(7, false); // Reset days
        });
      }
-
-     // Save updated data locally
      await _saveCompartmentData();
-
-     // Provide user feedback
      ScaffoldMessenger.of(context).showSnackBar(
        SnackBar(content: Text('Compartment ${index + 1} schedule deleted.')),
      );
      print("Compartment ${index + 1} data deleted.");
   }
 
-
   void _openSetDialog(int index) {
-    final TextEditingController nameController = TextEditingController(text: compartmentData[index]['name'] == 'Compartment ${index + 1}' ? '' : compartmentData[index]['name']);
+    final TextEditingController nameController = TextEditingController(
+        text: compartmentData[index]['name'] == 'Compartment ${index + 1}' ? '' : compartmentData[index]['name']);
     TimeOfDay? selectedTime = _parseTime(compartmentData[index]['time']);
     String displayTime = selectedTime != null ? selectedTime.format(context) : 'Tap to select time';
+    // Crucially, get a mutable copy of the days list for the dialog
+    List<bool> currentDays = List<bool>.from(compartmentData[index]['days'] as List<bool>);
+
 
     showDialog(
       context: context,
-      // Prevent closing dialog by tapping outside if needed
-      // barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
           return AlertDialog(
@@ -835,6 +710,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   TextField(
                     controller: nameController,
@@ -876,16 +752,49 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                       ),
                     ),
                   ),
+                  SizedBox(height: 15),
+                  Row( // Row for "Repeat on Days:" and "Select Everyday" button
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text("Repeat on Days:", style: TextStyle(fontWeight: FontWeight.bold)),
+                      TextButton( // Changed to TextButton for less emphasis than ElevatedButton
+                        onPressed: () {
+                          setDialogState(() {
+                            for (int i = 0; i < currentDays.length; i++) {
+                              currentDays[i] = true;
+                            }
+                          });
+                        },
+                        child: Text("Select Everyday"),
+                      ),
+                    ],
+                  ),
+                  SizedBox(height: 8),
+                  // --- Day Selector Chips ---
+                  Wrap( // Use Wrap for chips to flow to next line if needed
+                    spacing: 6.0, // Horizontal space between chips
+                    runSpacing: 0.0, // Vertical space between lines of chips
+                    children: List<Widget>.generate(7, (int dayIndex) {
+                      return ChoiceChip(
+                        label: Text(_dayAbbreviations[dayIndex]),
+                        selected: currentDays[dayIndex],
+                        onSelected: (bool selected) {
+                          setDialogState(() {
+                            currentDays[dayIndex] = selected;
+                          });
+                        },
+                      );
+                    }).toList(),
+                  ),
                 ],
               ),
             ),
             actions: [
-              // --- Add Delete Button ---
-              if (compartmentData[index]['time'] != null) // Only show delete if time is set
+              if (compartmentData[index]['time'] != null)
                 TextButton(
                   onPressed: !_isBluetoothConnected ? null : () {
-                     Navigator.pop(context); // Close dialog first
-                     _deleteCompartmentData(index); // Call the delete function
+                     Navigator.pop(context);
+                     _deleteCompartmentData(index);
                   },
                   child: Text('Delete', style: TextStyle(color: Colors.red)),
                 ),
@@ -894,8 +803,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                 child: Text('Cancel'),
               ),
               TextButton(
-                // Disable save if bluetooth is not connected
-                onPressed: !_isBluetoothConnected ? null : () async { // Marked as async
+                onPressed: !_isBluetoothConnected ? null : () async {
                   String name = nameController.text.trim();
                   if (name.isEmpty) {
                      ScaffoldMessenger.of(context).showSnackBar(
@@ -909,28 +817,28 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                      );
                      return;
                   }
+                  // Check if at least one day is selected
+                  if (!currentDays.contains(true)) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Please select at least one day.')),
+                    );
+                    return;
+                  }
 
-                  // Format time as HH:mm (24-hour format)
-                  // Safely access hour and minute using the null assertion operator (!)
-                  // We know selectedTime is not null here because of the check above.
                   String timeString = DateFormat('HH:mm').format(DateTime(2023, 1, 1, selectedTime!.hour, selectedTime!.minute));
 
-                  // Send data to Arduino FIRST
-                  _sendToArduino(index, name, timeString);
+                  // Send data to Arduino
+                  _sendToArduino(index, name, timeString, currentDays);
 
-                  // Update the main screen state only AFTER successful sending (or based on desired logic)
-                  // Consider if update should happen even if send fails? Current logic updates regardless.
                   if (mounted) {
                     setState(() {
                       compartmentData[index]['name'] = name;
                       compartmentData[index]['time'] = timeString;
+                      compartmentData[index]['days'] = List<bool>.from(currentDays); // Save the selected days
                     });
                   }
-
-                  // Save the updated data locally
                   await _saveCompartmentData();
-
-                  Navigator.pop(context); // Close dialog
+                  Navigator.pop(context);
                 },
                 child: Text('Save'),
               ),
@@ -942,7 +850,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
   }
 
   TimeOfDay? _parseTime(String? timeString) {
-    if (timeString == null || timeString.isEmpty || timeString == "-1:-1") return null; // Also check for "-1:-1"
+    if (timeString == null || timeString.isEmpty || timeString == "-1:-1") return null;
     try {
       final format = DateFormat('HH:mm');
       final dt = format.parse(timeString);
@@ -953,10 +861,8 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     }
   }
 
-
-  void _sendToArduino(int index, String name, String time) {
-    // Use the local state variable to check connection
-    // We also check widget.connection.isConnected as a backup
+  // MODIFIED: Added days parameter and changed how daysString is created
+  void _sendToArduino(int index, String name, String time, List<bool> days) {
     if (!_isBluetoothConnected || !widget.connection.isConnected) {
        if (mounted) {
          ScaffoldMessenger.of(context).showSnackBar(
@@ -968,21 +874,29 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     }
 
     String compartmentCode = 'C${index + 1}';
-    // Send empty name and -1:-1 time for deletion
-    String message = '$compartmentCode|$name|$time\n';
+    // Convert days list to comma-separated string of abbreviations for selected days
+    List<String> selectedDayAbbreviations = [];
+    for (int i = 0; i < days.length; i++) {
+      if (days[i]) {
+        selectedDayAbbreviations.add(_dayAbbreviations[i]);
+      }
+    }
+    String daysString = selectedDayAbbreviations.join(',');
+
+    String message = '$compartmentCode|$name|$time|$daysString\n'; // Added daysString
+
     print("CompartmentScreen: Attempting to send message: $message");
     try {
       widget.connection.output.add(Uint8List.fromList(message.codeUnits));
       widget.connection.output.allSent.then((_) {
          print('CompartmentScreen: Successfully sent to Arduino: $message');
-         // Removed SnackBar here
+         // SnackBar for confirmation is now handled by _handleIncomingMessage based on Arduino's reply
       }).catchError((error) {
          print("CompartmentScreen: Error confirming send: $error");
          if (mounted) {
            ScaffoldMessenger.of(context).showSnackBar(
              SnackBar(content: Text('Error confirming send: $error'), backgroundColor: Colors.red),
            );
-            // Update connection state if error suggests disconnection
            setState(() { _isBluetoothConnected = false; });
          }
       });
@@ -992,13 +906,11 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
          ScaffoldMessenger.of(context).showSnackBar(
            SnackBar(content: Text('Error sending data: $e'), backgroundColor: Colors.red),
          );
-          // Update connection state if error suggests disconnection
          setState(() { _isBluetoothConnected = false; });
        }
     }
   }
 
-  // --- NEW: Function to show the message history dialog ---
   void _showMessageHistoryDialog() {
     showDialog(
       context: context,
@@ -1006,14 +918,13 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
         return AlertDialog(
           title: Text('Messages'),
           content: Container(
-            width: double.maxFinite, // Allow the dialog to take more width
+            width: double.maxFinite,
             child: messageHistory.isEmpty
                 ? Center(child: Text('No messages yet.'))
                 : ListView.builder(
-                    shrinkWrap: true, // Important for ListView inside AlertDialog
+                    shrinkWrap: true,
                     itemCount: messageHistory.length,
                     itemBuilder: (context, index) {
-                      // Display messages in reverse order (latest first)
                       final message = messageHistory[messageHistory.length - 1 - index];
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4.0),
@@ -1023,12 +934,11 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                   ),
           ),
           actions: [
-            // --- Add Delete All Messages Button ---
             if (messageHistory.isNotEmpty)
               TextButton(
                 onPressed: () {
                   _clearMessageHistory();
-                  Navigator.pop(context); // Close the dialog after clearing
+                  Navigator.pop(context);
                 },
                 child: Text('Clear All', style: TextStyle(color: Colors.red)),
               ),
@@ -1042,11 +952,26 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     );
   }
 
+  // Helper function to get a display string for scheduled days
+  String _getScheduledDaysString(List<bool> days) {
+    List<String> scheduledDayNames = [];
+    for (int i = 0; i < days.length; i++) {
+      if (days[i]) {
+        scheduledDayNames.add(_dayAbbreviations[i]);
+      }
+    }
+    if (scheduledDayNames.isEmpty) {
+      return 'No days set';
+    }
+    if (scheduledDayNames.length == 7) {
+      return 'Everyday';
+    }
+    return scheduledDayNames.join(', ');
+  }
+
 
   @override
   Widget build(BuildContext context) {
-    // Update local connection state based on the widget's connection property
-    // This helps ensure the UI reflects the current connection status
     _isBluetoothConnected = widget.connection.isConnected;
 
     return Scaffold(
@@ -1054,26 +979,17 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
         title: Text("Pill Compartment Configuration"),
         centerTitle: true,
         actions: [
-          // --- Add Message History Icon Button ---
           IconButton(
-            icon: Icon(Icons.message), // Message icon
-            onPressed: _showMessageHistoryDialog, // Call the dialog function on press
+            icon: Icon(Icons.message),
+            onPressed: _showMessageHistoryDialog,
             tooltip: 'View Messages',
           ),
-          // Removed the refresh button from here, assuming message history is more important
-          // You can add it back if needed, perhaps in a different location or as part of a menu
-          // IconButton(
-          //   icon: Icon(Icons.refresh),
-          //   onPressed: isConnecting ? null : _requestPermissionsAndGetDevices, // Updated to call the permission request function
-          //   tooltip: 'Refresh Devices',
-          // )
         ],
       ),
       body: _isLoading
             ? Center(child: CircularProgressIndicator())
-            : Column( // Add column to show connection status message and message display
+            : Column(
               children: [
-                // Show connection status banner if not connected
                 if (!_isBluetoothConnected)
                   Container(
                      width: double.infinity,
@@ -1085,16 +1001,18 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                        textAlign: TextAlign.center,
                      ),
                    ),
-                // List view takes remaining space
                 Expanded(
                   child: ListView.builder(
                     padding: EdgeInsets.all(10),
                     itemCount: 6,
                     itemBuilder: (context, index) {
-                      String name = compartmentData[index]['name'] ?? 'Compartment ${index + 1}';
-                      String? timeStr = compartmentData[index]['time'];
+                      String name = compartmentData[index]['name'] as String? ?? 'Compartment ${index + 1}';
+                      String? timeStr = compartmentData[index]['time'] as String?;
                       TimeOfDay? time = _parseTime(timeStr);
-                      String displayTime = time != null ? time.format(context) : 'Not set';
+                      String displayTime = time != null ? time.format(context) : 'Time not set';
+                      // Get the days list and display string
+                      List<bool> days = compartmentData[index]['days'] as List<bool>? ?? List<bool>.filled(7, false);
+                      String daysDisplayString = _getScheduledDaysString(days);
 
                       return Card(
                         elevation: 3,
@@ -1106,16 +1024,21 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                               backgroundColor: Theme.of(context).primaryColorLight,
                           ),
                           title: Text(name, style: TextStyle(fontWeight: FontWeight.bold)),
-                          subtitle: Text('Time: $displayTime'),
+                          subtitle: Column( // Use Column to display time and days
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Time: $displayTime'),
+                              SizedBox(height: 2),
+                              Text('Days: $daysDisplayString', style: TextStyle(fontSize: 12, color: Colors.grey[700])),
+                            ],
+                          ),
                           trailing: Icon(Icons.edit, color: Theme.of(context).primaryColor),
-                          // Disable onTap if bluetooth is not connected? Optional UX choice.
                           onTap: () => _openSetDialog(index),
                         ),
                       );
                     },
                   ),
                 ),
-                // Removed the latest Arduino message display card from here
               ],
             ),
     );
