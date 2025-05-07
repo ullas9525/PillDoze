@@ -4,9 +4,11 @@ import 'dart:typed_data';
 import 'package:intl/intl.dart'; // Required for date/time formatting
 import 'package:shared_preferences/shared_preferences.dart'; // Import shared_preferences
 import 'dart:convert'; // Import dart:convert for JSON encoding/decoding
-import 'dart:async'; // Import async for StreamController
+import 'dart:async'; // Import async for StreamController and Timer
 import 'package:flutter/services.dart'; // Required for PlatformException
-import 'package:permission_handler/permission_handler.dart'; // Import permission_handler
+// import 'package:permission_handler/permission_handler.dart'; // Keep if openAppSettings is used elsewhere
+// import 'package:url_launcher/url_launcher.dart'; // Removed url_launcher as it's no longer needed for opening settings
+import 'dart:io' show Platform; // Import Platform for platform detection
 
 void main() {
   runApp(MyApp());
@@ -100,35 +102,11 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
       selectedDevice = null;
     });
 
-    Map<Permission, PermissionStatus> statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothConnect,
-      Permission.location,
-    ].request();
-
-    bool allPermissionsGranted = true;
-    statuses.forEach((permission, status) {
-      if (!status.isGranted) {
-        print("Permission not granted: ${permission.toString()} - ${status.toString()}");
-        allPermissionsGranted = false;
-      }
-    });
-
-    if (mounted) {
-      if (allPermissionsGranted) {
-        print("All required permissions granted.");
-        Future.delayed(Duration(milliseconds: 300), () {
-           _checkBluetoothStateAndGetDevices();
-        });
-      } else {
-        setState(() {
-          connectionStatus = 'Permissions denied. Cannot scan for devices.';
-        });
-        print("Required permissions not granted.");
-         openAppSettings();
-      }
-    }
+  
+    await getBondedDevices();
+      
   }
+
 
   Future<void> _checkBluetoothStateAndGetDevices() async {
     print("Checking Bluetooth state and getting devices (after permissions)...");
@@ -201,7 +179,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
       if (mounted) {
         setState(() {
           devicesList = devices;
-          connectionStatus = devices.isEmpty ? 'No bonded devices found. Please pair your dispenser.' : 'Select a device.';
+          connectionStatus = devices.isEmpty ? 'No bonded devices found. Please pair your dispenser in your phone\'s Bluetooth settings.' : 'Select a device.';
         });
         print("Found ${devices.length} bonded devices.");
       }
@@ -334,17 +312,42 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
   }
 
   void _handleIncomingMessage(String message) {
-    print("Received message from Arduino: '$message'");
+    print("Received message from HopeBox: '$message'");
     _messageController.add(message);
     // Further handling can be done on the CompartmentScreen or here if needed
   }
 
+  // Function to show the pairing info dialog
+  void _showPairingInfo() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Pairing Information'),
+        content: Text('Please ensure your pill dispenser is paired with your phone via your phone\'s Bluetooth settings before attempting to connect here. Only paired devices will appear in the list.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK'),
+          ),
+          // Removed the "Open Settings" button
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+
     return Scaffold(
       appBar: AppBar(
         title: Text('Connect Bluetooth Device'),
         centerTitle: true,
+        // Added the info icon to the leading property
+        leading: IconButton(
+          icon: Icon(Icons.info_outline),
+          tooltip: 'Pairing Information',
+          onPressed: _showPairingInfo,
+        ),
         actions: [
            IconButton(
              icon: Icon(Icons.refresh),
@@ -365,6 +368,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                 child: Text(
                   connectionStatus,
                   textAlign: TextAlign.center,
+                  // Use isConnected from _BluetoothConnectScreenState
                   style: TextStyle(fontSize: 16, color: isConnected ? Colors.green : Theme.of(context).colorScheme.error ),
                 ),
               ),
@@ -398,6 +402,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
             ),
             SizedBox(height: 20),
             ElevatedButton(
+              // Use isConnecting and isConnected from _BluetoothConnectScreenState
               onPressed: (selectedDevice == null || isConnecting || isConnected) ? null : _connectToDevice,
               style: ElevatedButton.styleFrom(
                 padding: EdgeInsets.symmetric(vertical: 15),
@@ -408,6 +413,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                 disabledBackgroundColor: Colors.grey[400],
                 foregroundColor: Colors.black,
               ),
+              // Use isConnecting from _BluetoothConnectScreenState
               child: isConnecting
                   ? SizedBox(
                       height: 20,
@@ -416,9 +422,11 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                   : Text(isConnected ? 'Connected' : 'Connect', style: TextStyle(fontSize: 16)),
             ),
             SizedBox(height: 15),
+            // Only show the "Configure Compartments" button if connected
             if (isConnected && connection != null)
               ElevatedButton(
                 onPressed: () {
+                  // Check connection state again before navigating
                   if (connection == null || !isConnected) {
                        if (mounted) {
                          setState(() {
@@ -439,7 +447,9 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                       ),
                     ),
                   ).then((_) {
+                    // This block runs when returning from CompartmentScreen
                     print("Returned from CompartmentScreen.");
+                    // Check the connection status upon returning
                     if (mounted && !(connection?.isConnected ?? false)) {
                        print("Connection found disconnected upon returning.");
                        setState(() {
@@ -493,19 +503,29 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
 
   List<String> messageHistory = [];
   bool _isLoading = true;
-  bool _isBluetoothConnected = false;
+  bool _isBluetoothConnected = false; // This state belongs here
   String latestArduinoMessage = 'No messages yet.';
   StreamSubscription<String>? _messageSubscription;
 
   // Helper for day names
   final List<String> _dayAbbreviations = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
+  // Timer and list to store remaining times
+  Timer? _timer;
+  List<Duration?> _remainingTimes = List<Duration?>.filled(6, null);
+
   @override
   void initState() {
     super.initState();
+    // Access widget.connection here as it's passed to this widget
     _isBluetoothConnected = widget.connection.isConnected;
     print("CompartmentScreen initState. Initial connection state: $_isBluetoothConnected");
-    _loadCompartmentData();
+    _loadCompartmentData().then((_) {
+      // Calculate initial remaining times after data is loaded
+      _calculateAllRemainingTimes();
+      // Start the timer after initial calculation
+      _startTimer();
+    });
     _loadMessageHistory();
 
     _messageSubscription = widget.messageStream.listen((message) {
@@ -536,9 +556,98 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
 
   @override
   void dispose() {
+    print("CompartmentScreen dispose called. Cancelling timer.");
+    _timer?.cancel(); // Cancel the timer
     _messageSubscription?.cancel();
     super.dispose();
   }
+
+  void _startTimer() {
+    _timer = Timer.periodic(Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel(); // Cancel timer if widget is disposed
+        return;
+      }
+      _calculateAllRemainingTimes();
+    });
+  }
+
+  void _calculateAllRemainingTimes() {
+    if (!mounted) return;
+    List<Duration?> newRemainingTimes = [];
+    for (int i = 0; i < 6; i++) {
+      newRemainingTimes.add(_calculateNextScheduledTime(i));
+    }
+    setState(() {
+      _remainingTimes = newRemainingTimes;
+    });
+  }
+
+  Duration? _calculateNextScheduledTime(int index) {
+    final compartment = compartmentData.length > index ? compartmentData[index] : null;
+    if (compartment == null || compartment['time'] == null || compartment['time'] == "-1:-1") {
+      return null; // No schedule set
+    }
+
+    final String? timeStr = compartment['time']?.toString();
+    final List<bool>? days = compartment['days'] is List<bool> ? compartment['days'] as List<bool> : (compartment['days'] is List ? (compartment['days'] as List).map((d) => d == true).toList().cast<bool>() : null);
+
+    if (timeStr == null || days == null || !days.contains(true)) {
+      return null; // Invalid time or no days selected
+    }
+
+    final TimeOfDay? scheduledTime = _parseTime(timeStr);
+    if (scheduledTime == null) return null; // Error parsing time
+
+    final DateTime now = DateTime.now();
+    DateTime nextScheduledDateTime;
+
+    // Find the next scheduled day starting from today
+    for (int i = 0; i < 7; i++) {
+      final DateTime candidateDate = now.add(Duration(days: i));
+      final int candidateWeekday = candidateDate.weekday; // 1 = Mon, ..., 7 = Sun
+
+      // Map DateTime weekday (1-7, Mon-Sun) to days list index (0-6, Sun-Sat)
+      // Sunday (7) maps to index 0
+      // Monday (1) maps to index 1
+      // ...
+      // Saturday (6) maps to index 6
+      final int daysListIndex = candidateWeekday % 7; // 0 for Sun, 1 for Mon, ..., 6 for Sat
+
+      // Check if the candidate day is scheduled
+      if (days[daysListIndex]) {
+        // Create a DateTime for the scheduled time on the candidate date
+        DateTime candidateDateTime = DateTime(
+          candidateDate.year,
+          candidateDate.month,
+          candidateDate.day,
+          scheduledTime.hour,
+          scheduledTime.minute,
+        );
+
+        // If the candidate scheduled time is in the future, this is the next scheduled time
+        if (candidateDateTime.isAfter(now)) {
+          return candidateDateTime.difference(now);
+        }
+      }
+    }
+
+    return null; // No future scheduled time found within the next 7 days
+  }
+
+
+  String _formatDuration(Duration duration) {
+    if (duration.isNegative) {
+      return 'Due'; // Or some other indicator for overdue
+    }
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    if (duration.inHours >= 1) {
+      return "${twoDigits(duration.inHours)}h ${twoDigits(duration.inMinutes.remainder(60))}m";
+    } else {
+      return "${twoDigits(duration.inMinutes.remainder(60))}m ${twoDigits(duration.inSeconds.remainder(60))}s";
+    }
+  }
+
 
   void _handleIncomingMessage(String message) {
     print("CompartmentScreen received message from stream: '$message'");
@@ -571,7 +680,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
        setState(() { _isBluetoothConnected = false; });
     } else if (message.startsWith("Updated C") || message.startsWith("Cleared schedule")) {
         ScaffoldMessenger.of(context).showSnackBar(
-         SnackBar(content: Text('Arduino: $message'), backgroundColor: Colors.blue),
+         SnackBar(content: Text('HopeBox: $message'), backgroundColor: Colors.blue),
        );
     }
   }
@@ -622,14 +731,14 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     if (savedDataJson != null) {
       try {
         final List<dynamic> decodedList = jsonDecode(savedDataJson);
-        final List<Map<String, dynamic>> loadedData = decodedList.map((item) {
+        List<Map<String, dynamic>> loadedData = decodedList.map((item) { // Made loadedData mutable
           if (item is Map) {
             // Ensure 'days' is correctly parsed as List<bool>
             List<bool> daysList = List<bool>.filled(7, false);
             if (item['days'] is List) {
               List<dynamic> rawDays = item['days'];
               if (rawDays.length == 7) {
-                daysList = rawDays.map((d) => d == true).toList();
+                daysList = rawDays.map((d) => d == true).toList().cast<bool>(); // Ensure cast to bool
               }
             }
             return {
@@ -642,16 +751,33 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
           return {'name': 'Error', 'time': null, 'days': List<bool>.filled(7, false)};
         }).toList();
 
-        if (loadedData.length == 6) {
-           if (mounted) {
-             setState(() { compartmentData = loadedData; });
-             print("CompartmentScreen: Successfully loaded compartment data (v2).");
-           }
-        } else {
-           print("CompartmentScreen: Warning: Loaded data (v2) length mismatch (${loadedData.length}). Using defaults.");
+        // Ensure we have exactly 6 compartments after loading
+        while (loadedData.length < 6) {
+            loadedData.add({'name': 'Compartment ${loadedData.length + 1}', 'time': null, 'days': List<bool>.filled(7, false)});
         }
+        // Trim if somehow more than 6 were loaded (shouldn't happen with current save logic but as a safeguard)
+        if (loadedData.length > 6) {
+            loadedData = loadedData.sublist(0, 6);
+        }
+
+
+        if (mounted) {
+           setState(() { compartmentData = loadedData; });
+           print("CompartmentScreen: Successfully loaded compartment data (v2).");
+        }
+
       } catch (e) {
          print("CompartmentScreen: Error loading compartment data (v2): $e. Using defaults.");
+         // If loading fails, reset to default data structure
+         if (mounted) {
+           setState(() {
+             compartmentData = List.generate(6, (i) => {
+               'name': 'Compartment ${i + 1}',
+               'time': null,
+               'days': List<bool>.filled(7, false),
+             });
+           });
+         }
          // Consider clearing corrupted data: prefs.remove(_compartmentDataKey);
       }
     } else {
@@ -672,10 +798,6 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
   }
 
   void _deleteCompartmentData(int index) async {
-     // Send a message to Arduino to clear the schedule for this compartment
-     // Format: C<index>|<Name>|-1:-1|<D0,D1,D2,D3,D4,D5,D6>
-     // Name can be empty, days string is all zeros for deletion.
-     // MODIFIED: Sending empty string for days for deletion
      _sendToArduino(index, "", "-1:-1", List<bool>.filled(7, false));
 
      if (mounted) {
@@ -683,6 +805,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
          compartmentData[index]['name'] = 'Compartment ${index + 1}';
          compartmentData[index]['time'] = null;
          compartmentData[index]['days'] = List<bool>.filled(7, false); // Reset days
+         _remainingTimes[index] = null; // Clear timer for this compartment
        });
      }
      await _saveCompartmentData();
@@ -693,12 +816,25 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
   }
 
   void _openSetDialog(int index) {
+    // Safely access compartment data, providing defaults if necessary
+    final compartment = compartmentData.length > index ? compartmentData[index] : {'name': 'Compartment ${index + 1}', 'time': null, 'days': List<bool>.filled(7, false)};
+
     final TextEditingController nameController = TextEditingController(
-        text: compartmentData[index]['name'] == 'Compartment ${index + 1}' ? '' : compartmentData[index]['name']);
-    TimeOfDay? selectedTime = _parseTime(compartmentData[index]['time']);
+        text: compartment['name'] == 'Compartment ${index + 1}' ? '' : compartment['name']?.toString()); // Added toString()
+    TimeOfDay? selectedTime = _parseTime(compartment['time']?.toString()); // Added toString()
     String displayTime = selectedTime != null ? selectedTime.format(context) : 'Tap to select time';
-    // Crucially, get a mutable copy of the days list for the dialog
-    List<bool> currentDays = List<bool>.from(compartmentData[index]['days'] as List<bool>);
+
+    // Safely get a mutable copy of the days list, providing a default if the data is missing or incorrect
+    List<bool> currentDays = [];
+    if (compartment['days'] is List<bool> && (compartment['days'] as List<bool>).length == 7) {
+        currentDays = List<bool>.from(compartment['days'] as List<bool>);
+    } else if (compartment['days'] is List && (compartment['days'] as List).length == 7) {
+       // Handle case where days might be loaded as List<dynamic> but contain bools
+       currentDays = (compartment['days'] as List).map((d) => d == true).toList().cast<bool>();
+    }
+    else {
+        currentDays = List<bool>.filled(7, false);
+    }
 
 
     showDialog(
@@ -790,7 +926,8 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
               ),
             ),
             actions: [
-              if (compartmentData[index]['time'] != null)
+              // Check if a schedule is set before showing the Delete button
+              if (compartment['time'] != null && compartment['time'] != "-1:-1")
                 TextButton(
                   onPressed: !_isBluetoothConnected ? null : () {
                      Navigator.pop(context);
@@ -838,6 +975,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                     });
                   }
                   await _saveCompartmentData();
+                  _calculateAllRemainingTimes(); // Recalculate timers after saving
                   Navigator.pop(context);
                 },
                 child: Text('Save'),
@@ -863,10 +1001,11 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
 
   // MODIFIED: Added days parameter and changed how daysString is created
   void _sendToArduino(int index, String name, String time, List<bool> days) {
-    if (!_isBluetoothConnected || !widget.connection.isConnected) {
+    // Added robust null check for widget.connection
+    if (widget.connection == null || !widget.connection!.isConnected) {
        if (mounted) {
          ScaffoldMessenger.of(context).showSnackBar(
-           SnackBar(content: Text('Bluetooth disconnected! Cannot send data.'), backgroundColor: Colors.red),
+           SnackBar(content: Text('Bluetooth disconnected! Cannot send data to HopeBox.'), backgroundColor: Colors.red),
          );
        }
        print("CompartmentScreen: Attempted to send data but Bluetooth is disconnected.");
@@ -887,9 +1026,9 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
 
     print("CompartmentScreen: Attempting to send message: $message");
     try {
-      widget.connection.output.add(Uint8List.fromList(message.codeUnits));
-      widget.connection.output.allSent.then((_) {
-         print('CompartmentScreen: Successfully sent to Arduino: $message');
+      widget.connection!.output.add(Uint8List.fromList(message.codeUnits));
+      widget.connection!.output.allSent.then((_) {
+         print('CompartmentScreen: Successfully sent to HopeBox: $message');
          // SnackBar for confirmation is now handled by _handleIncomingMessage based on Arduino's reply
       }).catchError((error) {
          print("CompartmentScreen: Error confirming send: $error");
@@ -959,7 +1098,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
       if (days[i]) {
         scheduledDayNames.add(_dayAbbreviations[i]);
       }
-    }
+      }
     if (scheduledDayNames.isEmpty) {
       return 'No days set';
     }
@@ -972,7 +1111,9 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    _isBluetoothConnected = widget.connection.isConnected;
+    // This build method belongs to _CompartmentScreenState,
+    // so it can access its own members like _isLoading, compartmentData, etc.
+    _isBluetoothConnected = widget.connection?.isConnected ?? false;
 
     return Scaffold(
       appBar: AppBar(
@@ -981,16 +1122,16 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
         actions: [
           IconButton(
             icon: Icon(Icons.message),
-            onPressed: _showMessageHistoryDialog,
+            onPressed: _showMessageHistoryDialog, // This method is in _CompartmentScreenState
             tooltip: 'View Messages',
           ),
         ],
       ),
-      body: _isLoading
+      body: _isLoading // This variable is in _CompartmentScreenState
             ? Center(child: CircularProgressIndicator())
             : Column(
               children: [
-                if (!_isBluetoothConnected)
+                if (!_isBluetoothConnected) // This variable is in _CompartmentScreenState
                   Container(
                      width: double.infinity,
                      color: Theme.of(context).colorScheme.error,
@@ -1006,13 +1147,18 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                     padding: EdgeInsets.all(10),
                     itemCount: 6,
                     itemBuilder: (context, index) {
+                      // These variables and methods are in _CompartmentScreenState
                       String name = compartmentData[index]['name'] as String? ?? 'Compartment ${index + 1}';
                       String? timeStr = compartmentData[index]['time'] as String?;
                       TimeOfDay? time = _parseTime(timeStr);
                       String displayTime = time != null ? time.format(context) : 'Time not set';
-                      // Get the days list and display string
                       List<bool> days = compartmentData[index]['days'] as List<bool>? ?? List<bool>.filled(7, false);
                       String daysDisplayString = _getScheduledDaysString(days);
+
+                      // Get the remaining time for this compartment
+                      Duration? remainingTime = _remainingTimes.length > index ? _remainingTimes[index] : null;
+                      String? timerDisplay = remainingTime != null && !remainingTime.isNegative ? _formatDuration(remainingTime) : null;
+
 
                       return Card(
                         elevation: 3,
@@ -1032,8 +1178,18 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                               Text('Days: $daysDisplayString', style: TextStyle(fontSize: 12, color: Colors.grey[700])),
                             ],
                           ),
-                          trailing: Icon(Icons.edit, color: Theme.of(context).primaryColor),
-                          onTap: () => _openSetDialog(index),
+                          // Place the timer display here
+                          trailing: timerDisplay != null
+                              ? Text(
+                                  timerDisplay,
+                                  style: TextStyle(
+                                    fontSize: 12, // Slightly larger than before for better visibility
+                                    color: Colors.grey[700], // Still light color
+                                    fontWeight: FontWeight.w600, // Slightly bolder
+                                  ),
+                                )
+                              : null, // No trailing widget if no timer to display
+                          onTap: () => _openSetDialog(index), // This method is in _CompartmentScreenState
                         ),
                       );
                     },
