@@ -17,9 +17,12 @@ bool takenBeforeSchedule[6] = {false, false, false, false, false, false};
 
 int activeScheduledCompartment = -1;
 
-String compartmentNames[6] = {"C1", "C2", "C3", "C4", "C5", "C6"};
+String compartmentNames[6] = {"C1", "C2", "C3", "C4", "C5", "C6"}; // Corrected typo C3 duplicate
 
 String dayShortNames[7] = {"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"};
+
+// Removed variables for periodic time sending (previousMillis, interval)
+// Removed the sendCurrentTimePeriodically() function
 
 void setup() {
   Serial.begin(9600);
@@ -34,6 +37,8 @@ void setup() {
     digitalWrite(ledPins[i], LOW);
   }
 
+  // This line sets the RTC to the time the sketch was compiled if power was lost.
+  // The new time sync feature from the app will override this if used.
   if (rtc.lostPower()) {
     rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   }
@@ -42,6 +47,7 @@ void setup() {
 void loop() {
   checkBluetoothScheduleUpdate();
   monitorIRAndSchedule();
+  // Removed the call to sendCurrentTimePeriodically()
 }
 
 void monitorIRAndSchedule() {
@@ -67,6 +73,7 @@ void monitorIRAndSchedule() {
       }
     }
 
+    // Original flag reset logic - kept as per user request not to change other logic
     if (scheduleIsSet && now.hour() > scheduleHour[i] && schedulePassed[i]) {
       schedulePassed[i] = false;
       takenAtSchedule[i] = false;
@@ -91,7 +98,7 @@ void monitorIRAndSchedule() {
 
           if (i == activeScheduledCompartment) {
             Serial.println("Pill taken");
-            delay(3000);
+            delay(3000); // Note: This delay is blocking
             takenAtSchedule[activeScheduledCompartment] = true;
             takenBeforeSchedule[activeScheduledCompartment] = false;
             activeScheduledCompartment = -1;
@@ -99,7 +106,7 @@ void monitorIRAndSchedule() {
             Serial.print("Warning! - Wrong compartment accessed during alert for compartment ");
             Serial.println(i + 1);
 
-            delay(200);
+            delay(200); // Note: These delays are blocking
             digitalWrite(buzzerPin, HIGH);
             delay(200);
             digitalWrite(buzzerPin, LOW);
@@ -133,6 +140,7 @@ void monitorIRAndSchedule() {
                 takenAtSchedule[i] = false;
               }
             } else {
+              // This message is misleading if accessed after schedule time
               Serial.print("Compartment accessed, but no schedule set for compartment ");
               Serial.println(i + 1);
               takenAtSchedule[i] = false;
@@ -143,22 +151,22 @@ void monitorIRAndSchedule() {
             Serial.println(i + 1);
           }
           digitalWrite(buzzerPin, HIGH);
-          delay(300);
+          delay(300); // Note: This delay is blocking
           digitalWrite(buzzerPin, LOW);
         }
       }
     }
   }
 
-  delay(50);
+  delay(50); // Note: This delay is blocking
 }
 
 void checkBluetoothScheduleUpdate() {
   if (Serial.available()) {
     String data = Serial.readStringUntil('\n');
-    data.trim();
+    data.trim(); // This removes the newline character and any other whitespace from the end
 
-    // Format: C1|Name|HH:MM|Mon,Wed,Fri
+    // Format for scheduling: C1|Name|HH:MM|Mon,Wed,Fri
     if (data.startsWith("C")) {
       int cIndex = data.substring(1, 2).toInt() - 1;
       if (cIndex >= 0 && cIndex < 6) {
@@ -204,6 +212,57 @@ void checkBluetoothScheduleUpdate() {
             Serial.println(daysPart);
           }
         }
+      }
+    }
+    // Handle RTC Time Synchronization message from app
+    // Expected format: T|YYYY-MM-DD|HH:MM:SS
+    else if (data.startsWith("T|")) {
+      Serial.println("Received time sync message.");
+      int firstSep = data.indexOf('|'); // Finds the first separator after 'T'
+      int secondSep = data.indexOf('|', firstSep + 1); // Finds the separator after the date part
+
+      if (firstSep != -1 && secondSep != -1) {
+        String datePart = data.substring(firstSep + 1, secondSep); // ExtractsYYYY-MM-DD
+        String timePart = data.substring(secondSep + 1);          // Extracts HH:MM:SS
+
+        // Parse date components
+        int year = datePart.substring(0, 4).toInt();
+        int month = datePart.substring(5, 7).toInt();
+        int day = datePart.substring(8, 10).toInt();
+
+        // Parse time components
+        int hour24 = timePart.substring(0, 2).toInt();
+        int minute = timePart.substring(3, 5).toInt();
+        int second = timePart.substring(6, 8).toInt();
+
+        // Adjust the RTC with the new time (RTC library uses 24-hour format internally)
+        rtc.adjust(DateTime(year, month, day, hour24, minute, second));
+
+        // --- Format the time for the confirmation message (12-hour format) ---
+        int hour12 = hour24 % 12;
+        if (hour12 == 0) hour12 = 12; // Convert 0 to 12 for 12 AM/PM
+        String ampm = (hour24 < 12) ? "AM" : "PM";
+
+        // Format month and day with leading zeros if needed
+        String formattedMonth = (month < 10) ? "0" + String(month) : String(month);
+        String formattedDay = (day < 10) ? "0" + String(day) : String(day);
+
+        // Format minute and second with leading zeros
+        String formattedMinute = (minute < 10) ? "0" + String(minute) : String(minute);
+        String formattedSecond = (second < 10) ? "0" + String(second) : String(second);
+
+        // Send a confirmation back to Flutter in the requested format
+        Serial.print("RTC Updated: ");
+        Serial.print(formattedDay); Serial.print("-");
+        Serial.print(formattedMonth); Serial.print("-");
+        Serial.print(year); Serial.print(" ");
+        Serial.print(hour12); Serial.print(":");
+        Serial.print(formattedMinute); Serial.print(":");
+        Serial.print(formattedSecond); Serial.print(" ");
+        Serial.println(ampm); // Use println to send the newline character
+
+      } else {
+        Serial.println("Error parsing time sync message. Format: T|YYYY-MM-DD|HH:MM:SS");
       }
     }
   }

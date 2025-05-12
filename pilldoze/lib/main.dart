@@ -6,7 +6,8 @@ import 'package:shared_preferences/shared_preferences.dart'; // Import shared_pr
 import 'dart:convert'; // Import dart:convert for JSON encoding/decoding
 import 'dart:async'; // Import async for StreamController and Timer
 import 'package:flutter/services.dart'; // Required for PlatformException
-import 'package:permission_handler/permission_handler.dart'; // Keep if openAppSettings is used elsewhere
+import 'package:permission_handler/permission_handler.dart'; // Import Permission class
+
 // import 'package:url_launcher/url_launcher.dart'; // Removed url_launcher as it's no longer needed for opening settings
 import 'dart:io' show Platform; // Import Platform for platform detection
 
@@ -102,12 +103,12 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
       selectedDevice = null;
     });
 
-    // Ensure permission_handler is imported if openAppSettings is used
-    // import 'package:permission_handler/permission_handler.dart';
+    // Request necessary permissions for Bluetooth scanning and connection.
+    // Location permission is required for Bluetooth scanning on Android 6.0+
     Map<Permission, PermissionStatus> statuses = await [
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
-      Permission.location, // Location is required for scanning on newer Android
+      Permission.location,
     ].request();
 
     bool allPermissionsGranted = true;
@@ -130,7 +131,7 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
         });
         print("Required permissions not granted.");
          // Optionally open app settings to allow user to grant permissions manually
-         // openAppSettings();
+         // openAppSettings(); // Uncomment this line and ensure permission_handler is imported if you want to open settings
       }
     }
   }
@@ -341,9 +342,48 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
 
   void _handleIncomingMessage(String message) {
     print("Received message from Arduino: '$message'");
+    // Add the message to the stream for the CompartmentScreen to listen to
     _messageController.add(message);
-    // Further handling can be done on the CompartmentScreen or here if needed
+
+    // No longer updating _latestRtcTime here as it's removed from display
+    // The message history will still contain the "RTC Updated:" message
   }
+
+  // Function to send current time to Arduino
+  Future<void> _sendCurrentTimeToArduino() async {
+    if (connection == null || !isConnected) {
+      print("Cannot send time: Bluetooth not connected.");
+      // Optionally show a snackbar
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Bluetooth not connected to send time.'), backgroundColor: Colors.red),
+        );
+      }
+      return;
+    }
+
+    DateTime now = DateTime.now();
+    // Format: T|YYYY-MM-DD|HH:MM:SS
+    String formattedTime = DateFormat('yyyy-MM-dd|HH:mm:ss').format(now);
+    String message = "T|$formattedTime\n"; // New message type 'T' for Time, followed by a newline
+
+    print("Attempting to send current time to Arduino: '$message'");
+    try {
+      connection!.output.add(Uint8List.fromList(message.codeUnits));
+      await connection!.output.allSent; // Wait for the message to be sent
+      print("Successfully sent time to Arduino: '$message'");
+      // No longer expecting a specific confirmation message to update a time display
+      // The Arduino will still send "RTC Updated:", which goes to message history
+    } catch (e) {
+      print("Error sending time to Arduino: $e");
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to send time to Arduino: ${e.toString()}.'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
 
   // Function to show the pairing info dialog
   void _showPairingInfo() {
@@ -457,8 +497,8 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
             // Only show the "Configure Compartments" button if connected
             if (isConnected && connection != null)
               ElevatedButton(
-                onPressed: () {
-                  // Check connection state again before navigating
+                onPressed: () async { // IMPORTANT: Make this an async function
+                  // Existing connection check
                   if (connection == null || !isConnected) {
                        if (mounted) {
                          setState(() {
@@ -469,6 +509,10 @@ class _BluetoothConnectScreenState extends State<BluetoothConnectScreen> {
                        print("Attempted to navigate but connection is null or not connected.");
                        return;
                   }
+
+                  // Send current time to Arduino before navigating
+                  await _sendCurrentTimeToArduino();
+
                   print("Navigating to CompartmentScreen.");
                   Navigator.push(
                     context,
@@ -538,6 +582,11 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
   bool _isBluetoothConnected = false; // This state belongs here
   String latestArduinoMessage = 'No messages yet.';
   StreamSubscription<String>? _messageSubscription;
+
+  // State variable to hold the latest received RTC time
+  // Keeping this variable and its update logic as requested ("dont touch any other")
+  String _latestRtcTime = 'Waiting for RTC time...';
+
 
   // Helper for day names
   final List<String> _dayAbbreviations = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -733,6 +782,17 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     setState(() {
       messageHistory.add(message);
       latestArduinoMessage = message;
+
+      // Check if the message is the RTC update confirmation
+      if (message.startsWith("RTC Updated: ")) {
+        // This message is a one-time confirmation after manual sync
+        // Update the state variable, but it's not displayed on the main screen now
+        _latestRtcTime = message.substring("RTC Updated: ".length);
+      }
+      // Check if the message is the continuous time update (if it were still being sent)
+      // else if (message.startsWith("TIME|")) {
+      //    _latestRtcTime = message.substring("TIME|".length);
+      // }
     });
     _saveMessageHistory();
 
@@ -743,9 +803,14 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     bool noScheduleCondition = message.contains("Compartment accessed, but no schedule set");
     bool disconnectedCondition = message.contains("Disconnected");
     bool connectionErrorCondition = message.contains("Connection Error");
-    // MODIFIED: Updated condition to match Arduino's "Updated C" message
+    // Updated condition to match Arduino's "Updated C" message
     bool updateDeleteCondition = message.startsWith("Updated C") || message.contains(" schedule deleted.");
     bool missedDoseCondition = message.contains("Missed dose.");
+    // Condition for RTC Update message (already handled above for state update)
+    bool rtcUpdateConfirmationCondition = message.startsWith("RTC Updated: ");
+    // Condition for continuous time update message (commented out as not sent continuously)
+    // bool continuousTimeCondition = message.startsWith("TIME|");
+
 
     print("  - pillTakenCondition: $pillTakenCondition");
     print("  - wrongCompartmentCondition: $wrongCompartmentCondition");
@@ -754,9 +819,12 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     print("  - connectionErrorCondition: $connectionErrorCondition");
     print("  - updateDeleteCondition: $updateDeleteCondition");
     print("  - missedDoseCondition: $missedDoseCondition");
+    print("  - rtcUpdateConfirmationCondition: $rtcUpdateConfirmationCondition");
+    // print("  - continuousTimeCondition: $continuousTimeCondition");
 
 
-    // Show Snackbars for specific messages
+    // Show Snackbars for specific messages (excluding the RTC update message which is no longer displayed)
+    // Also exclude continuous time messages if they were being sent
     if (pillTakenCondition) {
        ScaffoldMessenger.of(context).showSnackBar(
          SnackBar(content: Text('Pill taken successfully!'), backgroundColor: Colors.green),
@@ -794,9 +862,15 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
         );
          // Recalculate timers after a missed dose is detected (flags are reset on Arduino)
         _calculateAllRemainingTimes();
-    } else {
+    } else if (!rtcUpdateConfirmationCondition /* && !continuousTimeCondition */){ // Only show snackbar for other messages
         // Debug: If none of the conditions are met, print the message that didn't match
         print("CompartmentScreen: Received message did not match any known alert conditions: '$message'");
+        // Optionally show a generic snackbar for unhandled messages
+        // if (mounted) {
+        //    ScaffoldMessenger.of(context).showSnackBar(
+        //      SnackBar(content: Text('Arduino: $message')),
+        //    );
+        // }
     }
   }
 
@@ -1120,7 +1194,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
     }
   }
 
-  // MODIFIED: Added days parameter and changed how daysString is created
+  // Modified to include days parameter
   void _sendToArduino(int index, String name, String time, List<bool> days) {
     print("CompartmentScreen: Inside _sendToArduino for compartment $index."); // Added debug print
     print("CompartmentScreen: widget.connection is null: ${widget.connection == null}"); // Added debug print
@@ -1258,6 +1332,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
       body: _isLoading // This variable is in _CompartmentScreenState
             ? Center(child: CircularProgressIndicator())
             : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch, // Stretch children horizontally
               children: [
                 if (!_isBluetoothConnected) // This variable is in _CompartmentScreenState
                   Container(
@@ -1270,6 +1345,7 @@ class _CompartmentScreenState extends State<CompartmentScreen> {
                        textAlign: TextAlign.center,
                      ),
                    ),
+                // Removed the Text widget that displayed the Arduino RTC time from here.
                 Expanded(
                   child: ListView.builder(
                     padding: EdgeInsets.all(10),
