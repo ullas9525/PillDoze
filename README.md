@@ -23,7 +23,7 @@ The system is optimized with LEDs and sensors, keeping it simple and effective.
 - 👀 **6 IR Sensors** track compartment access
 - 🔊 **Buzzer** alerts on schedule or wrong pill attempt
 - 🧠 **Smart Detection Logic** to reduce human error
-- 🧩 Fully Arduino-based, no external display required
+- 🧩 Fully Arduino-based
 
 ---
 
