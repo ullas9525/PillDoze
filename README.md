@@ -77,10 +77,10 @@ The system is optimized with LEDs and sensors, keeping it simple and effective.
 
 ## 📦 Use Cases
 
-🧓 Elderly individuals with regular medication
-🧠 Alzheimer’s or dementia patients
-🏥 Clinics and care centers
-📚 Academic embedded system projects
+- 🧓 Elderly individuals with regular medication
+- 🧠 Alzheimer’s or dementia patients
+- 🏥 Clinics and care centers
+- 📚 Academic embedded system projects
 
 ---
 
