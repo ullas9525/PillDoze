@@ -43,7 +43,7 @@ The system is optimized with LEDs and sensors, keeping it simple and effective.
 ## 🖥️ Software Tools
 
 - **Arduino IDE** – Code development and upload
-- **Flutter** – For custom scheduling app *(update with actual platform used)*
+- **Flutter** – For custom scheduling app 
 - **GitHub** – Version control and collaboration
 
 ---
