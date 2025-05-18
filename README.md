@@ -84,7 +84,7 @@ The system is optimized with LEDs and sensors, keeping it simple and effective.
 
 ---
 
-👥 Team & Credits
+## 👥 Team & Credits
 
 Developers:
 Ullas B R,
