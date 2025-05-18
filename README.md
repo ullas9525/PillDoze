@@ -35,8 +35,6 @@ No LCD is used. Instead, the system is optimized with LEDs and sensors, keeping 
 | IR Sensors        | 6        |
 | LEDs              | 6        |
 | Buzzer            | 1        |
-| Push Buttons (optional) | As needed |
-| Breadboard & Jumpers | As needed |
 | Pill Box Compartments | 6 (manually divided) |
 | Power Supply / USB | 1        |
 
@@ -52,7 +50,7 @@ No LCD is used. Instead, the system is optimized with LEDs and sensors, keeping 
 
 ## 🧾 How It Works
 
-1. **User schedules pill times via the app**.
+1. **User schedules pill times via the app(Pilldoze)**.
 2. At the scheduled time, the **buzzer sounds**, and the system activates the **LED for the correct compartment**.
 3. **IR sensors detect** if the correct pill compartment is accessed.
 4. If the **correct pill is taken**, system goes silent.
