@@ -11,6 +11,7 @@ Taking the right medicine at the right time is critical, especially for the elde
 - LED guidance to indicate the correct compartment.
 - Real-time pill verification using IR sensors.
 - Alerts if a wrong compartment is opened.
+  
 The system is optimized with LEDs and sensors, keeping it simple and effective.
 
 ---
