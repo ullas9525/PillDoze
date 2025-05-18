@@ -68,10 +68,10 @@ The system is optimized with LEDs and sensors, keeping it simple and effective.
 ---
 ## 🔮 Future Improvements
 
-🛰️ Add IoT support with ESP32 for remote monitoring
-📱 Add SMS or app-based alert for missed doses
-📊 Pill intake history logging
-🔋 Battery backup system
+- 🛰️ Add IoT support with ESP32 for remote monitoring
+- 📱 Add SMS or app-based alert for missed doses
+- 📊 Pill intake history logging
+- 🔋 Battery backup system
 
 ---
 
