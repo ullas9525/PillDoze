@@ -65,6 +65,11 @@ The system is optimized with LEDs and sensors, keeping it simple and effective.
 - On scheduled time (via app), Arduino powers the correct LED.  
 - IR checks which compartment is opened and triggers alerts accordingly.
 
+## Circuit Diagram
+
+![image](https://github.com/user-attachments/assets/dfcbfbd6-50b2-4d42-b2c5-13d9b624f5f3)
+
+
 ---
 ## 🔮 Future Improvements
 
